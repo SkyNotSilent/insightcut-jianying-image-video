@@ -177,7 +177,7 @@
 .asset-status.is-danger { color: var(--color-danger); background: var(--color-danger-soft); animation: asset-error-nudge var(--duration-normal) var(--ease-out) both; }
 .asset-status.is-info svg { animation: asset-status-pulse 1.5s ease-in-out infinite; }
 
-.asset-inline-error { display: grid; gap: 2px; padding: 9px 10px; color: var(--color-danger); border-left: 2px solid var(--color-danger); background: var(--color-danger-soft); font-size: var(--text-sm); line-height: 1.45; }
+.asset-inline-error { display: grid; gap: 2px; padding: 9px 10px; color: var(--color-danger); border: 1px solid color-mix(in srgb, var(--color-danger) 28%, var(--color-border)); border-radius: var(--radius-sm); background: var(--color-danger-soft); font-size: var(--text-sm); line-height: 1.45; }
 .asset-inline-error span { color: var(--color-ink-soft); }
 
 .audio-asset-card { display: grid; grid-template-columns: minmax(0, 1fr); }

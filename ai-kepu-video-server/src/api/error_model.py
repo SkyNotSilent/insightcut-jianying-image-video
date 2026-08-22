@@ -22,6 +22,7 @@ class ErrorCode(str, Enum):
     RATE_LIMIT = "rate_limit"
     TIMEOUT = "timeout"
     PROVIDER_ERROR = "provider_error"
+    CONTENT_POLICY = "content_policy"
     NETWORK = "network"
     DISK = "disk"
     CONFIG_MISSING = "config_missing"
@@ -35,6 +36,7 @@ SAFE_MESSAGES = {
     ErrorCode.RATE_LIMIT: "服务请求过于频繁，请稍后重试。",
     ErrorCode.TIMEOUT: "服务响应超时，请检查网络后重试。",
     ErrorCode.PROVIDER_ERROR: "生成服务暂时异常，请稍后重试。",
+    ErrorCode.CONTENT_POLICY: "图片提示词未通过服务商内容检查，请修改提示词后重试。",
     ErrorCode.NETWORK: "无法连接生成服务，请检查网络后重试。",
     ErrorCode.DISK: "本地文件写入失败，请检查磁盘空间和目录权限。",
     ErrorCode.CONFIG_MISSING: "生成服务尚未配置完整，请先完成 API 配置。",
@@ -48,6 +50,7 @@ _DEFAULT_RETRYABLE = {
     ErrorCode.RATE_LIMIT: True,
     ErrorCode.TIMEOUT: True,
     ErrorCode.PROVIDER_ERROR: True,
+    ErrorCode.CONTENT_POLICY: False,
     ErrorCode.NETWORK: True,
     ErrorCode.DISK: False,
     ErrorCode.CONFIG_MISSING: False,

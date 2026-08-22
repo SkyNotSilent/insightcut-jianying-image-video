@@ -6,6 +6,7 @@
 import base64
 from collections import deque
 import logging
+import re
 import threading
 import time
 from pathlib import Path
@@ -43,10 +44,28 @@ STYLE_PRESETS = {
 }
 
 
+class GeneratedImagePath(str):
+    """String-compatible path carrying the prompt actually accepted upstream."""
+
+    def __new__(
+        cls,
+        path: str,
+        *,
+        requested_prompt: str,
+        submitted_prompt: str,
+        fallback_used: bool,
+    ):
+        value = super().__new__(cls, path)
+        value.requested_prompt = requested_prompt
+        value.submitted_prompt = submitted_prompt
+        value.fallback_used = bool(fallback_used)
+        return value
+
+
 class ImageGenerator:
     """图片生成器 - OpenAI/兼容 images generations 接口"""
 
-    def __init__(self, output_dir: str = "output/images"):
+    def __init__(self, output_dir: str = "output/images", generation_config: dict = None):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.image_config = Config.image_config()
@@ -54,7 +73,7 @@ class ImageGenerator:
         self.api_key = self.image_config.get("api_key") or Config.SEEDREAM_API_KEY
         self.model = self.image_config.get("model") or Config.SEEDREAM_MODEL
         self.size = self.image_config.get("size") or "auto"
-        generation_config = Config.generation_config()
+        generation_config = generation_config or Config.generation_config()
         retry_count = generation_config.get("retry_count", 2)
         self.max_attempts = max(1, min(6, int(retry_count) + 1))
         self.retry_interval_seconds = max(
@@ -113,17 +132,34 @@ class ImageGenerator:
             payload["stream"] = False
 
         resp = None
-        for attempt in range(self.max_attempts):
+        attempt = 0
+        fallback_prompts = iter(self._content_policy_fallbacks(prompt, suffix))
+        fallback_used = False
+        while True:
             try:
                 self._wait_for_rate_limit()
                 resp = requests.post(self.api_url, headers=headers, json=payload, timeout=90)
                 resp.raise_for_status()
                 break
             except requests.HTTPError as e:
-                if attempt == self.max_attempts - 1:
-                    raise ClassifiedError(
-                        classify_exception(e, provider="agnes")
-                    ) from None
+                if self._is_content_policy_rejection(resp):
+                    try:
+                        payload["prompt"] = next(fallback_prompts)
+                    except StopIteration:
+                        raise ClassifiedError(
+                            make_safe_error(
+                                ErrorCode.CONTENT_POLICY,
+                                provider="agnes",
+                                http_status=getattr(resp, "status_code", 400),
+                                request_id=self._response_request_id(resp),
+                            )
+                        ) from None
+                    fallback_used = True
+                    logger.warning("图片提示词未通过内容检查，已改用安全表达重试")
+                    continue
+                safe = classify_exception(e, provider="agnes")
+                if not safe.retryable or attempt >= self.max_attempts - 1:
+                    raise ClassifiedError(safe) from None
                 wait_seconds = self._retry_delay(resp, attempt)
                 logger.warning(
                     "图像生成失败（第%s次），%.0f秒后重试",
@@ -131,11 +167,11 @@ class ImageGenerator:
                     wait_seconds,
                 )
                 time.sleep(wait_seconds)
+                attempt += 1
             except Exception as e:
-                if attempt == self.max_attempts - 1:
-                    raise ClassifiedError(
-                        classify_exception(e, provider="agnes")
-                    ) from None
+                safe = classify_exception(e, provider="agnes")
+                if not safe.retryable or attempt >= self.max_attempts - 1:
+                    raise ClassifiedError(safe) from None
                 wait_seconds = self._retry_delay(None, attempt)
                 logger.warning(
                     "图像生成失败（第%s次），%.0f秒后重试",
@@ -143,6 +179,7 @@ class ImageGenerator:
                     wait_seconds,
                 )
                 time.sleep(wait_seconds)
+                attempt += 1
         data = resp.json()
 
         if not data.get("data"):
@@ -154,7 +191,76 @@ class ImageGenerator:
         output_path = self.output_dir / f"{output_stem}{self._detect_image_extension(image_bytes)}"
         output_path.write_bytes(image_bytes)
         logger.debug(f"图像保存: {output_path} ({len(image_bytes)} 字节)")
-        return str(output_path)
+        return GeneratedImagePath(
+            str(output_path),
+            requested_prompt=full_prompt,
+            submitted_prompt=str(payload["prompt"]),
+            fallback_used=fallback_used,
+        )
+
+    @staticmethod
+    def _response_request_id(resp) -> str:
+        headers = getattr(resp, "headers", {}) or {}
+        return str(
+            headers.get("x-request-id")
+            or headers.get("request-id")
+            or headers.get("cf-ray")
+            or ""
+        )
+
+    @staticmethod
+    def _is_content_policy_rejection(resp) -> bool:
+        if getattr(resp, "status_code", None) != 400:
+            return False
+        try:
+            body = resp.json()
+        except Exception:
+            return False
+        error = body.get("error") if isinstance(body, dict) else None
+        if not isinstance(error, dict):
+            return False
+        code = str(error.get("code") or "").strip().lower()
+        error_type = str(error.get("type") or "").strip().lower()
+        return code in {
+            "content_policy_violation",
+            "content_filter",
+            "prompt_rejected",
+        } or error_type in {"content_policy_violation", "content_filter"}
+
+    @staticmethod
+    def _content_policy_fallbacks(prompt: str, suffix: str):
+        """Return deterministic, model-free fallbacks for a rejected image prompt."""
+        replacements = (
+            (r"\bbroken\s+chains?\b", "a winding open path"),
+            (r"\bchains?\b", "flowing ribbons"),
+            (r"\btrauma(?:tic)?\b", "personal growth"),
+            (r"\bblood(?:y)?\b", "deep crimson tones"),
+            (r"\b(?:guns?|rifles?|pistols?|firearms?)\b", "everyday objects"),
+            (r"\b(?:knives?|blades?|swords?)\b", "crafted objects"),
+            (r"\b(?:dead|death|corpse|wound(?:ed)?|injur(?:y|ed))\b", "stillness"),
+            (r"\b(?:violent|violence|attack|fighting|warfare)\b", "challenge"),
+        )
+        softened = str(prompt or "")
+        for pattern, replacement in replacements:
+            softened = re.sub(pattern, replacement, softened, flags=re.IGNORECASE)
+        softened = re.sub(r"\s+", " ", softened).strip(" ,")
+        first = (
+            f"{softened}, calm positive educational scene, clear subject, warm natural light, {suffix}"
+            if softened
+            else ""
+        )
+        generic = (
+            "A calm hopeful person moving forward through warm sunlight and blooming "
+            "natural surroundings, symbolic personal growth and emotional resilience, "
+            f"clear educational composition, {suffix}"
+        )
+        original = f"{prompt}, {suffix}".strip(" ,")
+        seen = {original}
+        for candidate in (first, generic):
+            normalized = re.sub(r"\s+", " ", candidate).strip(" ,")
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                yield normalized
 
     def _is_openai_official_endpoint(self) -> bool:
         parsed = urlparse(self.api_url)

@@ -58,7 +58,7 @@ async def _stream_bytes(response):
     return b"".join(chunks)
 
 
-def test_select_image_accepts_same_segment_rejects_cross_segment_and_keeps_history(
+def test_select_image_accepts_same_and_cross_segment_versions_without_rewriting_history(
     tmp_path, temp_db, monkeypatch
 ):
     base_dir = tmp_path / "server"
@@ -120,6 +120,12 @@ def test_select_image_accepts_same_segment_rejects_cross_segment_and_keeps_histo
         segment_index=5,
         prompt="other prompt",
     )
+    published_draft = base_dir / "output" / task_id / ".finalize" / "versions" / "v1"
+    published_draft.mkdir(parents=True)
+    published_marker = published_draft / "draft_content.json"
+    published_marker.write_text("published", encoding="utf-8")
+    temp_db.save_task_result(task_id, str(published_draft), 2)
+    temp_db.update_task_status(task_id, "completed", "completed", None)
     before_asset_ids = {
         item["asset_id"] for item in temp_db.list_task_assets(task_id, "image")
     }
@@ -156,30 +162,109 @@ def test_select_image_accepts_same_segment_rejects_cross_segment_and_keeps_histo
     assert segment["image_status"] == "completed"
     after_assets = temp_db.list_task_assets(task_id, "image")
     assert before_asset_ids.issubset({item["asset_id"] for item in after_assets})
-    assert any(
-        item["source"] == "selected"
-        and item["path"] == history_asset["path"]
-        for item in after_assets
-    )
+    assert not any(item["source"] == "selected" for item in after_assets)
+    assert segment["selected_image_asset_id"] == history_asset["asset_id"]
+    assert temp_db.get_task(task_id)["status"] == "awaiting_finalization"
+    assert temp_db.get_task(task_id)["result"] is None
+    assert published_marker.read_text(encoding="utf-8") == "published"
     for path, mtime_ns in before_mtimes.items():
         assert path.stat().st_mtime_ns == mtime_ns
 
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            routes.select_segment_image(
-                task_id,
-                2,
-                _request(),
-                {"asset_id": other_asset["asset_id"]},
-            )
+    cross_selected = asyncio.run(
+        routes.select_segment_image(
+            task_id,
+            2,
+            _request(),
+            {"asset_id": other_asset["asset_id"]},
         )
-    assert exc_info.value.status_code == 409
-    assert "不属于当前分镜" in str(exc_info.value.detail)
-    unchanged = next(
+    )
+    assert cross_selected["image_path"] == other_asset["path"]
+    assert cross_selected["asset_id"] != other_asset["asset_id"]
+    assert cross_selected["origin_asset_id"] == other_asset["asset_id"]
+    changed = next(
         item for item in temp_db.get_segments(task_id) if item["segment_index"] == 2
     )
-    assert unchanged["image_path"] == history_asset["path"]
+    assert changed["image_path"] == other_asset["path"]
+    assert changed["selected_image_asset_id"] == cross_selected["asset_id"]
+    assert changed["image_prompt"] == "other prompt"
+    selected_version = temp_db.get_task_asset(task_id, cross_selected["asset_id"])
+    assert selected_version["source"] == "selected"
+    assert selected_version["segment_index"] == 2
+    assert selected_version["origin_asset_id"] == other_asset["asset_id"]
+    for path, mtime_ns in before_mtimes.items():
+        assert path.stat().st_mtime_ns == mtime_ns
 
+
+def test_cross_segment_audio_requires_text_mismatch_confirmation(
+    tmp_path, temp_db, monkeypatch
+):
+    base_dir = tmp_path / "server"
+    audio_dir = base_dir / "output" / "project-a" / "voiceovers"
+    audio_dir.mkdir(parents=True)
+    audio_file = audio_dir / "source.wav"
+    audio_file.write_bytes(b"audio")
+    task_id = "audio-cross-select"
+    _create_task(temp_db, task_id)
+    temp_db.save_segments(task_id, [
+        {
+            "segment_index": 0,
+            "text": "目标分镜文案",
+            "image_status": "pending",
+            "audio_status": "pending",
+        },
+        {
+            "segment_index": 1,
+            "text": "来源分镜文案",
+            "image_status": "pending",
+            "audio_status": "completed",
+            "audio_path": "output/project-a/voiceovers/source.wav",
+        },
+    ])
+    audio_asset = temp_db.save_task_asset(
+        task_id,
+        "audio",
+        "generated",
+        path="output/project-a/voiceovers/source.wav",
+        segment_index=1,
+        text="来源分镜文案",
+        voice_type="mimo:冰糖",
+    )
+    task = _task(task_id)
+    monkeypatch.setattr(routes.Config, "BASE_DIR", base_dir)
+    monkeypatch.setattr(routes, "mysql_client", temp_db)
+    monkeypatch.setattr(
+        routes,
+        "task_manager",
+        SimpleNamespace(get_task=lambda _task_id: task),
+    )
+    monkeypatch.setattr(routes.task_runtime, "is_running", lambda _task_id: False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(routes.select_segment_asset(
+            task_id,
+            0,
+            _request(),
+            {"asset_id": audio_asset["asset_id"], "asset_type": "audio"},
+        ))
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "audio_text_mismatch"
+
+    selected = asyncio.run(routes.select_segment_asset(
+        task_id,
+        0,
+        _request(),
+        {
+            "asset_id": audio_asset["asset_id"],
+            "asset_type": "audio",
+            "confirm_text_mismatch": True,
+        },
+    ))
+    assert selected["audio_text_mismatch"] is True
+    segment = temp_db.get_segments(task_id)[0]
+    assert selected["asset_id"] != audio_asset["asset_id"]
+    assert selected["origin_asset_id"] == audio_asset["asset_id"]
+    assert segment["selected_audio_asset_id"] == selected["asset_id"]
+    assert segment["audio_mismatch_confirmed"] == 1
 
 def test_review_first_upload_without_draft_creates_history_and_downloadable_file(
     tmp_path, temp_db, monkeypatch
@@ -234,6 +319,9 @@ def test_review_first_upload_without_draft_creates_history_and_downloadable_file
     assert upload_assets[0]["source"] == "upload"
     assert upload_assets[0]["segment_index"] == 7
     assert upload_assets[0]["path"] == str(uploaded_path)
+    assert segment["selected_image_asset_id"] == upload_assets[0]["asset_id"]
+    assert result["asset_id"] == upload_assets[0]["asset_id"]
+    assert temp_db.get_task(task_id)["status"] == "awaiting_finalization"
 
     response = asyncio.run(routes.download_task_assets(task_id, type="upload"))
     body = asyncio.run(_stream_bytes(response))
@@ -373,4 +461,3 @@ def test_asset_download_resolves_all_supported_relative_roots_and_preserves_reco
     assert after_segment["image_path"] == before_segment["image_path"]
     assert after_segment["audio_path"] == before_segment["audio_path"]
     assert after_segment["updated_at"] == before_segment["updated_at"]
-

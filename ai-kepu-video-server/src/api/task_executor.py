@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Thread
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from .task_manager import task_manager, TaskStatus
 from .task_runtime import TaskCancellation, TaskCancelled, task_runtime
 from src.core.pipeline import VideoEditorPipeline
@@ -50,6 +50,92 @@ class FinalizeAssetsMissingError(RuntimeError):
 def _require_checkpoint(saved: bool, description: str) -> None:
     if not saved:
         raise RecoverableTaskError(f"{description}保存失败")
+
+
+def _task_subtitle_options(task_row: Dict) -> Dict:
+    try:
+        value = json.loads(task_row.get("subtitle_options_json") or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _task_generation_options(task_row: Dict) -> Dict:
+    """Merge a task snapshot over global defaults and clamp runtime bounds."""
+    defaults = Config.generation_config()
+    try:
+        saved = json.loads(task_row.get("generation_options_json") or "{}")
+    except (TypeError, ValueError):
+        saved = {}
+    if not isinstance(saved, dict):
+        saved = {}
+    merged = {**defaults, **saved}
+    for key, default in (
+        ("prompt_concurrency", 4),
+        ("image_concurrency", 8),
+        ("tts_concurrency", 1),
+    ):
+        merged[key] = max(1, min(8, int(merged.get(key, default) or default)))
+    merged["retry_count"] = max(
+        0, min(5, int(merged.get("retry_count", 2) or 0))
+    )
+    merged["retry_interval_seconds"] = max(
+        1, min(60, int(merged.get("retry_interval_seconds", 5) or 5))
+    )
+    return merged
+
+
+def _asset_snapshot_json(
+    task_row: Dict,
+    segment: Dict,
+    asset_type: str,
+    *,
+    prompt: Optional[str] = None,
+    voice_type: Optional[str] = None,
+    tts_options: Optional[Dict] = None,
+) -> str:
+    """Capture the inputs that produced one immutable media version."""
+    payload = {
+        "asset_type": asset_type,
+        "text": segment.get("text") or "",
+        "ratio": normalize_ratio(task_row.get("ratio") or "16:9"),
+        "style": task_row.get("style") or "",
+        "generation_options": _task_generation_options(task_row),
+    }
+    if asset_type == "image":
+        payload["prompt"] = prompt if prompt is not None else segment.get("image_prompt") or ""
+    else:
+        payload["voice_type"] = voice_type or segment.get("audio_voice_type") or task_row.get("voice_type")
+        payload["tts_options"] = tts_options or {}
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _accepted_image_prompt(path: Any, fallback: str) -> str:
+    """Use the exact provider-accepted prompt when the adapter supplied it."""
+    value = getattr(path, "submitted_prompt", None)
+    return str(value or fallback or "")
+
+
+def _image_generation_metadata(path: Any) -> Optional[str]:
+    if not bool(getattr(path, "fallback_used", False)):
+        return None
+    return json.dumps(
+        {
+            "content_policy_fallback": True,
+            "requested_prompt": str(getattr(path, "requested_prompt", "") or ""),
+            "submitted_prompt": str(getattr(path, "submitted_prompt", "") or ""),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _segment_tts_options(segment: Dict) -> Dict:
+    try:
+        value = json.loads(segment.get("audio_tts_options_json") or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def _safe_failure(error: BaseException, provider: Optional[str] = None) -> SafeError:
@@ -715,6 +801,8 @@ class TaskExecutor:
             theme=task_row.get("theme") or "",
             output_dir=str(output_dir),
             canvas=canvas_for_ratio(ratio),
+            subtitle_options=_task_subtitle_options(task_row),
+            generation_options=_task_generation_options(task_row),
         )
         try:
             if cancellation:
@@ -992,6 +1080,8 @@ class TaskExecutor:
             theme=task_row.get("theme") or "",
             output_dir=str(output_dir),
             canvas=canvas,
+            subtitle_options=_task_subtitle_options(task_row),
+            generation_options=_task_generation_options(task_row),
         )
         parts = str(task_row.get("style") or "").split("|", 2)
         visual_style = parts[1] if len(parts) > 1 and parts[1] else "写实风格"
@@ -1000,7 +1090,7 @@ class TaskExecutor:
             task_tts_options = json.loads(task_row.get("tts_options_json") or "{}")
         except (TypeError, ValueError):
             task_tts_options = {}
-        generation_config = Config.generation_config()
+        generation_config = _task_generation_options(task_row)
         image_targets = [item for item in targets if item.get("asset_type") == "image"]
         audio_targets = [item for item in targets if item.get("asset_type") == "audio"]
         uploader = LocalUploader()
@@ -1034,7 +1124,13 @@ class TaskExecutor:
                     url = None
                     warning = _upload_warning(error)
                     logger.warning("[%s] 分镜 %s 图片本地归档失败", task_id, index)
-                return {"path": path, "url": url, "prompt": prompt, "warning": warning}
+                return {
+                    "path": path,
+                    "url": url,
+                    "prompt": _accepted_image_prompt(path, prompt),
+                    "metadata_json": _image_generation_metadata(path),
+                    "warning": warning,
+                }
 
             options = dict(task_tts_options)
             if segment.get("audio_tts_options_json"):
@@ -1159,6 +1255,7 @@ class TaskExecutor:
                             asset_kwargs = {
                                 "prompt": result["prompt"],
                                 "text": segment.get("text"),
+                                "metadata_json": result.get("metadata_json"),
                             }
                         else:
                             storage_warning = result.get("warning")
@@ -1181,7 +1278,7 @@ class TaskExecutor:
                             }
                         if not db_client.update_segment(task_id, index, updates):
                             raise RuntimeError("素材结果保存失败")
-                        db_client.save_task_asset(
+                        asset_record = db_client.save_task_asset(
                             task_id=task_id,
                             asset_type=asset_type,
                             source="regenerated" if target.get("mode") == "replace" else "generated",
@@ -1197,8 +1294,20 @@ class TaskExecutor:
                             error_message=(
                                 storage_warning.safe_message if storage_warning else None
                             ),
+                            operation_id=operation_id,
+                            snapshot_json=_asset_snapshot_json(
+                                task_row,
+                                segment,
+                                asset_type,
+                                prompt=result.get("prompt"),
+                                voice_type=result.get("voice"),
+                                tts_options=result.get("options"),
+                            ),
                             **asset_kwargs,
                         )
+                        if not asset_record:
+                            raise RuntimeError("素材版本保存失败")
+                        db_client.backfill_selected_asset_ids(task_id)
                         target["status"] = "completed"
                         target["error"] = None
                         target["storage_warning"] = (
@@ -1440,6 +1549,8 @@ class TaskExecutor:
                 theme=task_row.get("theme") or "",
                 output_dir=str(workspace.staging_dir),
                 canvas=canvas,
+                subtitle_options=_task_subtitle_options(task_row),
+                generation_options=_task_generation_options(task_row),
             )
             pipeline.draft_builder.build(
                 segments=[segment.get("text") or "" for segment in segments],
@@ -1640,6 +1751,8 @@ class TaskExecutor:
                 theme=theme,
                 output_dir=str(draft_dir),
                 canvas=canvas,
+                subtitle_options=_task_subtitle_options(task_row),
+                generation_options=_task_generation_options(task_row),
             )
 
             # 步骤 1: 文案改写 / 主题生成
@@ -1729,7 +1842,7 @@ class TaskExecutor:
             ]
             segments_count = len(pipeline.segments)
             logger.info(f"[{task_id}] [2/6] 分段完成，共 {segments_count} 段")
-            generation_config = Config.generation_config()
+            generation_config = _task_generation_options(task_row)
             prompt_concurrency = _bounded_concurrency(
                 generation_config.get("prompt_concurrency", 4), segments_count
             )
@@ -1948,6 +2061,14 @@ class TaskExecutor:
                             ),
                             status="completed",
                             error_message=preserved_error,
+                            snapshot_json=_asset_snapshot_json(
+                                task_row,
+                                segment,
+                                asset_type,
+                                prompt=segment.get("image_prompt"),
+                                voice_type=segment.get("audio_voice_type") or voice_type,
+                                tts_options=_segment_tts_options(segment) if asset_type == "audio" else None,
+                            ),
                         )
                     except Exception as error:
                         raise RecoverableTaskError(
@@ -1957,6 +2078,7 @@ class TaskExecutor:
                         raise RecoverableTaskError(
                             f"分镜 {segment_index} 已有{asset_type}资产检查点保存失败"
                         )
+            db_client.backfill_selected_asset_ids(task_id)
             logger.info(f"[{task_id}] 已保存分镜和图片提示词，共 {len(persisted_segments)} 段")
             logger.info(f"[{task_id}] [3/6] 图像描述生成完成")
             task.complete_step("image_prompt_generation")
@@ -2108,7 +2230,8 @@ class TaskExecutor:
                         "image_error_meta": final_error.metadata() if final_error else None,
                     }
                     label = f"AI 生成 · 分镜 {i + 1}"
-                    prompt = image_prompts[i] if i < len(image_prompts) else ""
+                    requested_prompt = image_prompts[i] if i < len(image_prompts) else ""
+                    prompt = _accepted_image_prompt(path, requested_prompt)
                     voice = None
                 else:
                     segment_voice, segment_options = segment_audio_settings[i]
@@ -2148,15 +2271,24 @@ class TaskExecutor:
                     metadata_json=(
                         json.dumps({"tts_options": segment_options}, ensure_ascii=False)
                         if asset_type == "audio"
-                        else None
+                        else _image_generation_metadata(path)
                     ),
                     status=status,
                     error_message=final_error.safe_message if final_error else None,
+                    snapshot_json=_asset_snapshot_json(
+                        task_row,
+                        persisted_segments[i],
+                        asset_type,
+                        prompt=prompt,
+                        voice_type=voice,
+                        tts_options=(segment_options if asset_type == "audio" else None),
+                    ),
                 )
                 if not asset_record:
                     raise RecoverableTaskError(
                         f"分镜 {segment_index} {asset_type}资产检查点保存失败"
                     )
+                db_client.backfill_selected_asset_ids(task_id)
                 return upload_error
 
             # Image and TTS have independent provider limits, but an unwritable
@@ -2574,6 +2706,12 @@ class TaskExecutor:
                         text=seg_text,
                         status=image_status,
                         error_message=image_error,
+                        snapshot_json=_asset_snapshot_json(
+                            task_row,
+                            seg_data,
+                            "image",
+                            prompt=seg_data["image_prompt"],
+                        ),
                     )
                 except Exception as e:
                     safe = _safe_failure(e, provider="local_storage")
@@ -2599,6 +2737,13 @@ class TaskExecutor:
                         metadata_json=json.dumps({"tts_options": segment_options}, ensure_ascii=False),
                         status=audio_status,
                         error_message=audio_error,
+                        snapshot_json=_asset_snapshot_json(
+                            task_row,
+                            seg_data,
+                            "audio",
+                            voice_type=segment_voice,
+                            tts_options=segment_options,
+                        ),
                     )
                 except Exception as e:
                     safe = _safe_failure(e, provider="local_storage")
@@ -2613,6 +2758,7 @@ class TaskExecutor:
                 db_client.save_segments(task_id, segments_data),
                 "最终分镜检查点",
             )
+            db_client.backfill_selected_asset_ids(task_id)
             logger.info(f"[{task_id}] 段落数据保存成功，共 {len(segments_data)} 段")
 
             # 设置任务结果

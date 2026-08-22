@@ -60,9 +60,31 @@ def ratio_for_canvas(width: int, height: int) -> str:
         return "9:16"
 
 
-def subtitle_preset_for_ratio(ratio: str = None) -> Dict[str, float]:
-    return dict(SUBTITLE_PRESETS[normalize_ratio(ratio)])
+def normalize_subtitle_options(options: dict = None) -> dict:
+    options = options or {}
+    return {
+        "size": options.get("size") if options.get("size") in {"small", "standard", "large"} else "standard",
+        "position": options.get("position") if options.get("position") in {"low", "standard", "high"} else "standard",
+        "outline": options.get("outline") if options.get("outline") in {"light", "standard", "strong"} else "standard",
+    }
 
 
-def subtitle_preset_for_canvas(width: int, height: int) -> Dict[str, float]:
-    return subtitle_preset_for_ratio(ratio_for_canvas(width, height))
+def subtitle_preset_for_ratio(ratio: str = None, options: dict = None) -> Dict[str, float]:
+    preset = dict(SUBTITLE_PRESETS[normalize_ratio(ratio)])
+    normalized = normalize_subtitle_options(options)
+    size_factor = {"small": 0.86, "standard": 1.0, "large": 1.16}[normalized["size"]]
+    position_delta = {"low": 0.035, "standard": 0.0, "high": -0.055}[normalized["position"]]
+    draft_position_delta = {"low": -0.06, "standard": 0.0, "high": 0.09}[normalized["position"]]
+    outline_width = {"light": 0.0, "standard": 2.0, "strong": 4.0}[normalized["outline"]]
+    draft_outline = {"light": 0.0, "standard": 0.55, "strong": 1.0}[normalized["outline"]]
+    preset["font_size_ratio"] *= size_factor
+    preset["draft_base_size"] *= size_factor
+    preset["y_ratio"] = max(0.72, min(0.97, preset["y_ratio"] + position_delta))
+    preset["draft_transform_y"] = max(-0.96, min(-0.55, preset["draft_transform_y"] + draft_position_delta))
+    preset["border_width"] = outline_width
+    preset["draft_border_width"] = draft_outline
+    return preset
+
+
+def subtitle_preset_for_canvas(width: int, height: int, options: dict = None) -> Dict[str, float]:
+    return subtitle_preset_for_ratio(ratio_for_canvas(width, height), options)

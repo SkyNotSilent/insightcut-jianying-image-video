@@ -249,6 +249,10 @@ class TaskManager:
         tts_options: Optional[Dict] = None,
         execution_mode: str = "full",
         script_policy: str = "rewrite",
+        source_draft_id: Optional[str] = None,
+        template_id: Optional[str] = None,
+        generation_options: Optional[Dict] = None,
+        subtitle_options: Optional[Dict] = None,
     ) -> str:
         """创建新任务"""
         task_id = uuid.uuid4().hex
@@ -266,6 +270,10 @@ class TaskManager:
             tts_options=task.tts_options,
             execution_mode=execution_mode,
             script_policy=script_policy,
+            source_draft_id=source_draft_id,
+            template_id=template_id,
+            generation_options=generation_options,
+            subtitle_options=subtitle_options,
         )
 
         # 缓存到内存
@@ -283,6 +291,10 @@ class TaskManager:
             "workflow_phase": workflow_phase,
             "plan_version": 0,
             "voice_confirmed": False,
+            "source_draft_id": source_draft_id,
+            "template_id": template_id,
+            "generation_options": generation_options or {},
+            "subtitle_options": subtitle_options or {},
         }
         redis_client.cache_task(task_id, task_data)
 

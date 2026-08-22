@@ -15,6 +15,7 @@ import {
 import { useNavigate, useParams } from 'react-router'
 import { cancelExportJob, createExport, getExportJob, getExportState, getMaterialsDownloadUrl, selectDraftFolder } from '../api/task'
 import { PollingFailureNotice } from '../components/PollingFailureNotice'
+import { ProjectStepBar } from '../components/ProjectStepBar'
 import { EmptyState, LoadingState } from '../components/StatusStates'
 import { usePollingResource } from '../hooks/usePollingResource'
 import { detectTargetOS, validateExtractPath } from '../lib/exportPath'
@@ -312,6 +313,7 @@ export function ExportPage() {
 
   return (
     <main className="delivery-page export-page">
+      <ProjectStepBar taskId={taskId} currentStep={6} reachedStep={6} />
       <header className="delivery-heading">
         <button className="button button-secondary" type="button" onClick={() => navigate(`/preview/${taskId}`)}><ArrowLeft size={16} aria-hidden="true" />返回编辑</button>
         <div>

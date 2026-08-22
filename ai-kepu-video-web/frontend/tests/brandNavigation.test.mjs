@@ -4,18 +4,22 @@ import test from 'node:test'
 
 const component = readFileSync(new URL('../src/components/BrandNavigation.jsx', import.meta.url), 'utf8')
 const css = readFileSync(new URL('../src/styles/app.css', import.meta.url), 'utf8')
-
-test('brand navigation renders the historical animated icon layers', () => {
+test('brand navigation reuses the canonical centered AIPM reticle structure', () => {
   assert.doesNotMatch(component, /\bClapperboard\b/)
-  for (const className of ['brand-glow', 'brand-inner', 'brand-reticles', 'brand-reticle-row', 'brand-reticle-corner', 'brand-dot']) {
-    assert.match(component, new RegExp(`className="[^"]*${className}`))
-  }
-  assert.match(component, /className="brand-mark" aria-hidden="true"/)
+  assert.match(component, /className="rail-brand-mark"/)
+  assert.match(component, /className="rail-brand-glow"/)
+  assert.match(component, /className="rail-brand-reticles"/)
+  assert.match(component, /className="rail-brand-dot"/)
 })
 
 test('brand icon restores stepped pauses and reduced-motion behavior', () => {
-  assert.match(css, /\.brand-glow\s*\{[^}]*conic-gradient[^}]*animation:\s*brand-glow-spin 4s linear infinite/s)
-  assert.match(css, /@keyframes brand-reticle-snap\s*\{\s*0%, 20%\s*\{[^}]*rotate\(0deg\)[^}]*\}\s*25%, 45%\s*\{[^}]*rotate\(90deg\)/s)
-  assert.match(css, /\.brand-dot\s*\{[^}]*animation:\s*brand-dot-pulse 2\.5s linear infinite/s)
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*\.brand-glow,[\s\S]*\.brand-dot\s*\{\s*animation:\s*none/s)
+  assert.match(css, /\.rail-brand-glow\s*\{[^}]*conic-gradient[^}]*animation:\s*rail-brand-glow-spin 6\.4s linear infinite/s)
+  assert.match(css, /@keyframes rail-brand-reticle-snap\s*\{\s*0%, 23%\s*\{[^}]*rotate\(0deg\)[^}]*\}\s*28%, 48%\s*\{[^}]*rotate\(90deg\)/s)
+  assert.match(css, /\.rail-brand-dot\s*\{[^}]*animation:\s*rail-brand-dot-pulse 2\.4s linear infinite/s)
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*\.rail-brand-glow,[\s\S]*\.rail-brand-dot,[\s\S]*\.brand-glow/s)
+})
+
+test('toast states use a complete low-saturation border instead of a one-sided accent stripe', () => {
+  assert.doesNotMatch(css, /\.toast-(?:success|warning|error|info)\s*\{[^}]*border-left/s)
+  assert.match(css, /\.toast\s*\{[^}]*border:\s*1px solid color-mix/s)
 })

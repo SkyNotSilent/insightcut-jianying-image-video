@@ -38,7 +38,8 @@ class SQLiteClient:
     TASK_CHECKPOINT_COLUMNS = frozenset({
         "script_text", "summary", "input_mode", "delete_files_on_delete",
         "execution_mode", "workflow_phase", "script_policy", "voice_confirmed",
-        "error_code", "error_meta_json",
+        "error_code", "error_meta_json", "source_draft_id", "template_id",
+        "generation_options_json", "subtitle_options_json",
     })
     SEGMENT_CHECKPOINT_COLUMNS = frozenset({
         "text", "image_prompt", "image_path", "image_url", "image_status",
@@ -48,6 +49,8 @@ class SQLiteClient:
         "prompt_error_code", "prompt_error_meta_json",
         "image_error_code", "image_error_meta_json",
         "audio_error_code", "audio_error_meta_json",
+        "selected_image_asset_id", "selected_audio_asset_id",
+        "audio_mismatch_confirmed",
     })
     CLEARABLE_SEGMENT_ERROR_COLUMNS = frozenset({
         "image_error", "audio_error", "prompt_error",
@@ -192,8 +195,28 @@ class SQLiteClient:
                     text TEXT,
                     voice_type TEXT,
                     metadata_json TEXT,
+                    operation_id TEXT,
+                    origin_asset_id TEXT,
+                    snapshot_json TEXT,
                     status TEXT DEFAULT 'completed',
                     error_message TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+                );
+
+                CREATE TABLE IF NOT EXISTS production_templates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    template_id TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    visual_style TEXT NOT NULL DEFAULT '电影质感',
+                    text_style TEXT NOT NULL DEFAULT '知识科普',
+                    ratio TEXT NOT NULL DEFAULT '16:9',
+                    voice_type TEXT,
+                    tts_options_json TEXT,
+                    subtitle_options_json TEXT NOT NULL DEFAULT '{}',
+                    generation_options_json TEXT NOT NULL DEFAULT '{}',
+                    is_default INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
                     updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
                 );
@@ -291,6 +314,209 @@ class SQLiteClient:
                     "summary": "TEXT",
                     "input_mode": "TEXT NOT NULL DEFAULT 'script'",
                 },
+            )
+            self._apply_column_migration(
+                cursor,
+                "20260823_global_shell_task_snapshots",
+                "tasks",
+                {
+                    "source_draft_id": "TEXT",
+                    "template_id": "TEXT",
+                    "generation_options_json": "TEXT",
+                    "subtitle_options_json": "TEXT",
+                },
+            )
+            self._apply_column_migration(
+                cursor,
+                "20260823_segment_asset_selection",
+                "task_segments",
+                {
+                    "selected_image_asset_id": "TEXT",
+                    "selected_audio_asset_id": "TEXT",
+                    "audio_mismatch_confirmed": "INTEGER NOT NULL DEFAULT 0",
+                },
+            )
+            self._apply_column_migration(
+                cursor,
+                "20260823_immutable_asset_metadata",
+                "task_assets",
+                {
+                    "operation_id": "TEXT",
+                    "origin_asset_id": "TEXT",
+                    "snapshot_json": "TEXT",
+                },
+            )
+            self._apply_migration(
+                cursor,
+                "20260823_production_templates",
+                """
+                CREATE TABLE IF NOT EXISTS production_templates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    template_id TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    visual_style TEXT NOT NULL DEFAULT '电影质感',
+                    text_style TEXT NOT NULL DEFAULT '知识科普',
+                    ratio TEXT NOT NULL DEFAULT '16:9',
+                    voice_type TEXT,
+                    tts_options_json TEXT,
+                    subtitle_options_json TEXT NOT NULL DEFAULT '{}',
+                    generation_options_json TEXT NOT NULL DEFAULT '{}',
+                    is_default INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_templates_default_updated
+                    ON production_templates(is_default, updated_at);
+                CREATE INDEX IF NOT EXISTS idx_assets_task_origin
+                    ON task_assets(task_id, origin_asset_id);
+                """,
+            )
+            self._apply_migration(
+                cursor,
+                "20260823_dedupe_legacy_asset_backfill",
+                """
+                UPDATE task_segments
+                SET selected_image_asset_id = (
+                    SELECT canonical.asset_id
+                    FROM task_assets duplicate
+                    JOIN task_assets canonical
+                      ON canonical.task_id = duplicate.task_id
+                     AND canonical.asset_type = duplicate.asset_type
+                     AND COALESCE(canonical.segment_index, -1) = COALESCE(duplicate.segment_index, -1)
+                     AND canonical.path = duplicate.path
+                     AND canonical.asset_id <> duplicate.asset_id
+                    WHERE duplicate.asset_id = task_segments.selected_image_asset_id
+                      AND duplicate.source = 'legacy'
+                    ORDER BY CASE WHEN canonical.source = 'legacy' THEN 1 ELSE 0 END,
+                             canonical.id ASC
+                    LIMIT 1
+                )
+                WHERE selected_image_asset_id IN (
+                    SELECT duplicate.asset_id
+                    FROM task_assets duplicate
+                    WHERE duplicate.source = 'legacy'
+                      AND EXISTS (
+                          SELECT 1 FROM task_assets canonical
+                          WHERE canonical.task_id = duplicate.task_id
+                            AND canonical.asset_type = duplicate.asset_type
+                            AND COALESCE(canonical.segment_index, -1) = COALESCE(duplicate.segment_index, -1)
+                            AND canonical.path = duplicate.path
+                            AND canonical.asset_id <> duplicate.asset_id
+                      )
+                );
+
+                UPDATE task_segments
+                SET selected_audio_asset_id = (
+                    SELECT canonical.asset_id
+                    FROM task_assets duplicate
+                    JOIN task_assets canonical
+                      ON canonical.task_id = duplicate.task_id
+                     AND canonical.asset_type = duplicate.asset_type
+                     AND COALESCE(canonical.segment_index, -1) = COALESCE(duplicate.segment_index, -1)
+                     AND canonical.path = duplicate.path
+                     AND canonical.asset_id <> duplicate.asset_id
+                    WHERE duplicate.asset_id = task_segments.selected_audio_asset_id
+                      AND duplicate.source = 'legacy'
+                    ORDER BY CASE WHEN canonical.source = 'legacy' THEN 1 ELSE 0 END,
+                             canonical.id ASC
+                    LIMIT 1
+                )
+                WHERE selected_audio_asset_id IN (
+                    SELECT duplicate.asset_id
+                    FROM task_assets duplicate
+                    WHERE duplicate.source = 'legacy'
+                      AND EXISTS (
+                          SELECT 1 FROM task_assets canonical
+                          WHERE canonical.task_id = duplicate.task_id
+                            AND canonical.asset_type = duplicate.asset_type
+                            AND COALESCE(canonical.segment_index, -1) = COALESCE(duplicate.segment_index, -1)
+                            AND canonical.path = duplicate.path
+                            AND canonical.asset_id <> duplicate.asset_id
+                      )
+                );
+
+                DELETE FROM task_assets AS duplicate
+                WHERE duplicate.source = 'legacy'
+                  AND duplicate.path IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM task_assets canonical
+                      WHERE canonical.task_id = duplicate.task_id
+                        AND canonical.asset_type = duplicate.asset_type
+                        AND COALESCE(canonical.segment_index, -1) = COALESCE(duplicate.segment_index, -1)
+                        AND canonical.path = duplicate.path
+                        AND canonical.asset_id <> duplicate.asset_id
+                        AND (canonical.source <> 'legacy' OR canonical.id < duplicate.id)
+                  );
+                """,
+            )
+            self._apply_migration(
+                cursor,
+                "20260823_asset_path_identity",
+                """
+                CREATE TEMP TABLE legacy_asset_replacements (
+                    duplicate_asset_id TEXT PRIMARY KEY,
+                    canonical_asset_id TEXT NOT NULL
+                );
+                INSERT INTO legacy_asset_replacements
+                    (duplicate_asset_id, canonical_asset_id)
+                SELECT duplicate.asset_id,
+                       (
+                           SELECT canonical.asset_id
+                           FROM task_assets canonical
+                           WHERE canonical.task_id = duplicate.task_id
+                             AND canonical.asset_type = duplicate.asset_type
+                             AND COALESCE(canonical.segment_index, -1) = COALESCE(duplicate.segment_index, -1)
+                             AND canonical.path = duplicate.path
+                             AND canonical.asset_id <> duplicate.asset_id
+                           ORDER BY CASE WHEN canonical.source = 'legacy' THEN 1 ELSE 0 END,
+                                    canonical.id ASC
+                           LIMIT 1
+                       )
+                FROM task_assets duplicate
+                WHERE duplicate.source = 'legacy'
+                  AND duplicate.path IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM task_assets canonical
+                      WHERE canonical.task_id = duplicate.task_id
+                        AND canonical.asset_type = duplicate.asset_type
+                        AND COALESCE(canonical.segment_index, -1) = COALESCE(duplicate.segment_index, -1)
+                        AND canonical.path = duplicate.path
+                        AND canonical.asset_id <> duplicate.asset_id
+                        AND (canonical.source <> 'legacy' OR canonical.id < duplicate.id)
+                  );
+                UPDATE task_segments
+                SET selected_image_asset_id = (
+                    SELECT canonical_asset_id
+                    FROM legacy_asset_replacements
+                    WHERE duplicate_asset_id = task_segments.selected_image_asset_id
+                )
+                WHERE selected_image_asset_id IN (
+                    SELECT duplicate_asset_id FROM legacy_asset_replacements
+                );
+                UPDATE task_segments
+                SET selected_audio_asset_id = (
+                    SELECT canonical_asset_id
+                    FROM legacy_asset_replacements
+                    WHERE duplicate_asset_id = task_segments.selected_audio_asset_id
+                )
+                WHERE selected_audio_asset_id IN (
+                    SELECT duplicate_asset_id FROM legacy_asset_replacements
+                );
+                DELETE FROM task_assets
+                WHERE asset_id IN (
+                    SELECT duplicate_asset_id FROM legacy_asset_replacements
+                );
+                DROP TABLE legacy_asset_replacements;
+                CREATE INDEX IF NOT EXISTS idx_task_assets_path_lookup
+                    ON task_assets(
+                        task_id,
+                        asset_type,
+                        COALESCE(segment_index, -1),
+                        path
+                    )
+                    WHERE path IS NOT NULL;
+                """,
             )
             self._apply_migration(
                 cursor,
@@ -772,6 +998,10 @@ class SQLiteClient:
         tts_options: Dict = None,
         execution_mode: str = "full",
         script_policy: str = "rewrite",
+        source_draft_id: str = None,
+        template_id: str = None,
+        generation_options: Dict = None,
+        subtitle_options: Dict = None,
     ) -> bool:
         if not self._initialized:
             self._init_db()
@@ -784,15 +1014,18 @@ class SQLiteClient:
                 """INSERT INTO tasks
                    (task_id, name, theme, style, length, ratio, voice_type,
                     tts_options_json, status, current_step, execution_mode,
-                    workflow_phase, script_policy, voice_confirmed)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    workflow_phase, script_policy, voice_confirmed, source_draft_id,
+                    template_id, generation_options_json, subtitle_options_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     task_id, name or theme[:20], theme, style, length, ratio,
                     voice_type,
                     json.dumps(tts_options, ensure_ascii=False) if tts_options else None,
                     'pending', 'pending', execution_mode,
                     'planning' if execution_mode == 'review_first' else 'pending',
-                    script_policy, 0,
+                    script_policy, 0, source_draft_id, template_id,
+                    json.dumps(generation_options or {}, ensure_ascii=False),
+                    json.dumps(subtitle_options or {}, ensure_ascii=False),
                 )
             )
             steps = [
@@ -1446,7 +1679,8 @@ class SQLiteClient:
         """Atomically update task settings and advance the plan version."""
         allowed = {
             "style", "ratio", "voice_type", "tts_options_json", "voice_confirmed",
-            "script_text", "summary", "workflow_phase",
+            "script_text", "summary", "workflow_phase", "template_id",
+            "generation_options_json", "subtitle_options_json",
         }
         fields = {key: value for key, value in updates.items() if key in allowed}
         if not fields:
@@ -1636,6 +1870,39 @@ class SQLiteClient:
             return True
         except Exception as exc:
             logger.error(f"清除任务结果记录失败: {exc}")
+            return False
+        finally:
+            conn.close()
+
+    def invalidate_task_result_for_finalization(self, task_id: str) -> bool:
+        """Atomically mark a review-first task dirty without deleting old files."""
+        if not self._initialized:
+            self._init_db()
+        if not self._initialized:
+            return False
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            cur.execute(
+                """UPDATE tasks
+                   SET status='awaiting_finalization',
+                       workflow_phase='awaiting_finalization',
+                       current_step='awaiting_finalization',
+                       error=NULL, error_code=NULL, error_meta_json=NULL,
+                       updated_at=datetime('now','localtime')
+                   WHERE task_id=? AND execution_mode='review_first'""",
+                (task_id,),
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                return False
+            cur.execute("DELETE FROM task_results WHERE task_id=?", (task_id,))
+            conn.commit()
+            return True
+        except Exception as exc:
+            conn.rollback()
+            logger.error("使生产草稿失效失败: %s", exc)
             return False
         finally:
             conn.close()
@@ -2118,7 +2385,15 @@ class SQLiteClient:
     def save_task_asset(self, task_id: str, asset_type: str, source: str, path: str = None,
                         url: str = None, segment_index: int = None, label: str = None,
                         prompt: str = None, text: str = None, voice_type: str = None,
-                        metadata_json: str = None, status: str = "completed", error_message: str = None) -> Dict:
+                        metadata_json: str = None, status: str = "completed",
+                        error_message: str = None, operation_id: str = None,
+                        origin_asset_id: str = None, snapshot_json: str = None) -> Dict:
+        """Persist an immutable asset version.
+
+        Re-reading a legacy path is idempotent, but a newly generated/uploaded
+        path always becomes a new row.  Existing rows are never rewritten, so
+        history timestamps remain stable when the workspace is refreshed.
+        """
         if not self._initialized:
             self._init_db()
         if not self._initialized:
@@ -2127,19 +2402,22 @@ class SQLiteClient:
             error_message = sanitize_persisted_error_text(error_message)
             conn = self._get_conn()
             cur = conn.cursor()
-            if source == "generated" and segment_index is not None:
+            if path and source == "legacy":
                 cur.execute(
                     """SELECT * FROM task_assets
-                       WHERE task_id=? AND asset_type=? AND source=? AND segment_index=?
-                       ORDER BY id DESC LIMIT 1""",
-                    (task_id, asset_type, source, segment_index)
+                       WHERE task_id=? AND asset_type=? AND path=?
+                         AND COALESCE(segment_index, -1)=COALESCE(?, -1)
+                       ORDER BY CASE WHEN source='legacy' THEN 1 ELSE 0 END, id ASC
+                       LIMIT 1""",
+                    (task_id, asset_type, path, segment_index)
                 )
             elif path:
                 cur.execute(
                     """SELECT * FROM task_assets
                        WHERE task_id=? AND asset_type=? AND source=? AND path=?
+                         AND COALESCE(segment_index, -1)=COALESCE(?, -1)
                        ORDER BY id DESC LIMIT 1""",
-                    (task_id, asset_type, source, path)
+                    (task_id, asset_type, source, path, segment_index)
                 )
             else:
                 cur.execute(
@@ -2150,26 +2428,19 @@ class SQLiteClient:
                 )
             existing = cur.fetchone()
             if existing:
-                cur.execute(
-                    """UPDATE task_assets SET segment_index=?, source=?, path=COALESCE(?, path),
-                       url=COALESCE(?, url), label=?,
-                       prompt=?, text=?, voice_type=?, metadata_json=?, status=?, error_message=?,
-                       updated_at=datetime('now','localtime')
-                       WHERE asset_id=?""",
-                    (segment_index, source, path, url, label, prompt, text, voice_type, metadata_json, status, error_message, existing["asset_id"])
-                )
-                conn.commit()
-                cur.execute("SELECT * FROM task_assets WHERE asset_id=?", (existing["asset_id"],))
-                row = dict(cur.fetchone())
                 conn.close()
-                return row
+                return dict(existing)
 
             asset_id = uuid.uuid4().hex
             cur.execute(
                 """INSERT INTO task_assets
-                   (asset_id, task_id, segment_index, asset_type, source, path, url, label, prompt, text, voice_type, metadata_json, status, error_message)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (asset_id, task_id, segment_index, asset_type, source, path, url, label, prompt, text, voice_type, metadata_json, status, error_message)
+                   (asset_id, task_id, segment_index, asset_type, source, path, url,
+                    label, prompt, text, voice_type, metadata_json, status,
+                    error_message, operation_id, origin_asset_id, snapshot_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (asset_id, task_id, segment_index, asset_type, source, path, url,
+                 label, prompt, text, voice_type, metadata_json, status,
+                 error_message, operation_id, origin_asset_id, snapshot_json)
             )
             conn.commit()
             cur.execute("SELECT * FROM task_assets WHERE asset_id=?", (asset_id,))
@@ -2216,13 +2487,256 @@ class SQLiteClient:
         try:
             conn = self._get_conn()
             cur = conn.cursor()
-            cur.execute("SELECT * FROM task_assets WHERE task_id=? AND asset_id=?", (task_id, asset_id))
+            cur.execute(
+                "SELECT * FROM task_assets WHERE task_id=? AND asset_id=?",
+                (task_id, asset_id),
+            )
             row = cur.fetchone()
             conn.close()
             return dict(row) if row else None
         except Exception as e:
             logger.error(f"获取任务资产失败: {e}")
             return None
+
+    def select_segment_asset(
+        self,
+        task_id: str,
+        segment_index: int,
+        asset: Dict,
+        asset_type: str,
+        confirm_text_mismatch: bool = False,
+    ) -> bool:
+        """Atomically point one segment at an existing immutable asset."""
+        if asset_type not in {"image", "audio"}:
+            return False
+        if not self._initialized:
+            self._init_db()
+        if not self._initialized:
+            return False
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT * FROM task_segments WHERE task_id=? AND segment_index=?",
+                (task_id, segment_index),
+            )
+            segment = cur.fetchone()
+            if not segment:
+                return False
+            if asset_type == "image":
+                cur.execute(
+                    """UPDATE task_segments
+                       SET selected_image_asset_id=?, image_path=?, image_url=?,
+                           image_prompt=COALESCE(NULLIF(?, ''), image_prompt),
+                           image_status='completed', image_error=NULL,
+                           image_error_code=NULL, image_error_meta_json=NULL,
+                           updated_at=datetime('now','localtime')
+                       WHERE task_id=? AND segment_index=?""",
+                    (
+                        asset.get("asset_id"), asset.get("path"), asset.get("url"),
+                        asset.get("prompt"),
+                        task_id, segment_index,
+                    ),
+                )
+            else:
+                cur.execute(
+                    """UPDATE task_segments
+                       SET selected_audio_asset_id=?, audio_path=?, audio_url=?,
+                           audio_voice_type=?, audio_status='completed',
+                           audio_error=NULL, audio_error_code=NULL,
+                           audio_error_meta_json=NULL, audio_mismatch_confirmed=?,
+                           updated_at=datetime('now','localtime')
+                       WHERE task_id=? AND segment_index=?""",
+                    (
+                        asset.get("asset_id"), asset.get("path"), asset.get("url"),
+                        asset.get("voice_type"), int(bool(confirm_text_mismatch)),
+                        task_id, segment_index,
+                    ),
+                )
+            conn.commit()
+            return cur.rowcount > 0
+        except Exception as exc:
+            conn.rollback()
+            logger.error("选择分镜素材失败: %s", exc)
+            return False
+        finally:
+            conn.close()
+
+    def backfill_selected_asset_ids(self, task_id: str) -> None:
+        """Idempotently align each segment pointer with its current media path."""
+        if not self._initialized:
+            self._init_db()
+        if not self._initialized:
+            return
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            rows = cur.execute(
+                "SELECT * FROM task_segments WHERE task_id=?", (task_id,)
+            ).fetchall()
+            for segment in rows:
+                for asset_type, path_column, selected_column in (
+                    ("image", "image_path", "selected_image_asset_id"),
+                    ("audio", "audio_path", "selected_audio_asset_id"),
+                ):
+                    if not segment[path_column]:
+                        continue
+                    selected_path = None
+                    if segment[selected_column]:
+                        selected = cur.execute(
+                            "SELECT path FROM task_assets WHERE task_id=? AND asset_id=?",
+                            (task_id, segment[selected_column]),
+                        ).fetchone()
+                        selected_path = selected["path"] if selected else None
+                    if selected_path == segment[path_column]:
+                        continue
+                    asset = cur.execute(
+                        """SELECT asset_id FROM task_assets
+                           WHERE task_id=? AND asset_type=? AND path=?
+                           ORDER BY id DESC LIMIT 1""",
+                        (task_id, asset_type, segment[path_column]),
+                    ).fetchone()
+                    if asset:
+                        cur.execute(
+                            f"UPDATE task_segments SET {selected_column}=? "
+                            "WHERE task_id=? AND segment_index=?",
+                            (asset["asset_id"], task_id, segment["segment_index"]),
+                        )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _template_row(row) -> Dict:
+        if not row:
+            return {}
+        item = dict(row)
+        for source, target in (
+            ("tts_options_json", "tts_options"),
+            ("subtitle_options_json", "subtitle_options"),
+            ("generation_options_json", "generation_options"),
+        ):
+            try:
+                item[target] = json.loads(item.get(source) or "{}")
+            except (TypeError, ValueError):
+                item[target] = {}
+        item["is_default"] = bool(item.get("is_default"))
+        return item
+
+    def list_production_templates(self) -> List[Dict]:
+        with self.get_connection() as conn:
+            if not conn:
+                return []
+            rows = conn.execute(
+                "SELECT * FROM production_templates ORDER BY is_default DESC, updated_at DESC"
+            ).fetchall()
+            return [self._template_row(row) for row in rows]
+
+    def create_production_template(self, values: Dict) -> Dict:
+        template_id = uuid.uuid4().hex
+        with self.get_connection() as conn:
+            if not conn:
+                return {}
+            cur = conn.cursor()
+            if values.get("is_default"):
+                cur.execute("UPDATE production_templates SET is_default=0")
+            cur.execute(
+                """INSERT INTO production_templates
+                   (template_id, name, description, visual_style, text_style, ratio,
+                    voice_type, tts_options_json, subtitle_options_json,
+                    generation_options_json, is_default)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    template_id, values.get("name") or "未命名模板",
+                    values.get("description"), values.get("visual_style") or "电影质感",
+                    values.get("text_style") or "知识科普", values.get("ratio") or "16:9",
+                    values.get("voice_type"), json.dumps(values.get("tts_options") or {}, ensure_ascii=False),
+                    json.dumps(values.get("subtitle_options") or {}, ensure_ascii=False),
+                    json.dumps(values.get("generation_options") or {}, ensure_ascii=False),
+                    int(bool(values.get("is_default"))),
+                ),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM production_templates WHERE template_id=?", (template_id,)
+            ).fetchone()
+            return self._template_row(row)
+
+    def update_production_template(self, template_id: str, values: Dict) -> Dict:
+        mapping = {
+            "name": "name", "description": "description",
+            "visual_style": "visual_style", "text_style": "text_style",
+            "ratio": "ratio", "voice_type": "voice_type",
+            "tts_options": "tts_options_json",
+            "subtitle_options": "subtitle_options_json",
+            "generation_options": "generation_options_json",
+            "is_default": "is_default",
+        }
+        with self.get_connection() as conn:
+            if not conn:
+                return {}
+            cur = conn.cursor()
+            if values.get("is_default"):
+                cur.execute("UPDATE production_templates SET is_default=0")
+            sets, params = [], []
+            for key, column in mapping.items():
+                if key not in values:
+                    continue
+                value = values[key]
+                if key in {"tts_options", "subtitle_options", "generation_options"}:
+                    value = json.dumps(value or {}, ensure_ascii=False)
+                elif key == "is_default":
+                    value = int(bool(value))
+                sets.append(f"{column}=?")
+                params.append(value)
+            if sets:
+                params.append(template_id)
+                cur.execute(
+                    f"UPDATE production_templates SET {', '.join(sets)}, "
+                    "updated_at=datetime('now','localtime') WHERE template_id=?",
+                    params,
+                )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM production_templates WHERE template_id=?", (template_id,)
+            ).fetchone()
+            return self._template_row(row)
+
+    def delete_production_template(self, template_id: str) -> bool:
+        with self.get_connection() as conn:
+            if not conn:
+                return False
+            cur = conn.execute(
+                "DELETE FROM production_templates WHERE template_id=?", (template_id,)
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def list_task_activity(self, limit: int = 20) -> List[Dict]:
+        """Return task activity with progress in one SQL round trip."""
+        with self.get_connection() as conn:
+            if not conn:
+                return []
+            rows = conn.execute(
+                """SELECT t.*,
+                          COUNT(s.id) AS segments_total,
+                          SUM(CASE WHEN s.image_status IN ('completed','stale') THEN 1 ELSE 0 END) AS images_ready,
+                          SUM(CASE WHEN s.audio_status IN ('completed','stale') THEN 1 ELSE 0 END) AS audio_ready,
+                          o.operation_id, o.kind AS operation_kind, o.state AS operation_state,
+                          o.completed_count, o.failed_count, o.targets_json
+                   FROM tasks t
+                   LEFT JOIN task_segments s ON s.task_id=t.task_id
+                   LEFT JOIN task_operations o ON o.id=(
+                       SELECT oo.id FROM task_operations oo
+                       WHERE oo.task_id=t.task_id AND oo.state IN ('pending','running')
+                       ORDER BY oo.id DESC LIMIT 1
+                   )
+                   WHERE t.status != 'deleting'
+                   GROUP BY t.task_id
+                   ORDER BY t.updated_at DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+            return [self._decode_task_error(dict(row)) for row in rows]
 
 
 # 全局 SQLite 客户端实例

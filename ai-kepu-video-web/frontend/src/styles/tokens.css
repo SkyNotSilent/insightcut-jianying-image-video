@@ -1,21 +1,21 @@
 :root {
   --font-body: "Avenir Next", "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
-  --font-display: "Songti SC", "STSong", "Noto Serif SC", Georgia, serif;
+  --font-display: "Avenir Next", "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
   --font-mono: "SFMono-Regular", Consolas, monospace;
 
-  --color-canvas: #ffffff;
+  --color-canvas: #f5f7fb;
   --color-surface: #ffffff;
   --color-surface-raised: #ffffff;
-  --color-surface-muted: #f6f6f7;
-  --color-surface-selected: #eef1f6;
-  --color-ink: #16161b;
-  --color-ink-soft: #46464e;
-  --color-ink-muted: #78787f;
-  --color-border: #e2e2e6;
-  --color-border-soft: #ececee;
-  --color-accent: #142944;
-  --color-accent-strong: #0a1626;
-  --color-accent-soft: #eef1f6;
+  --color-surface-muted: #f4f6fa;
+  --color-surface-selected: #edf4ff;
+  --color-ink: #14213a;
+  --color-ink-soft: #465269;
+  --color-ink-muted: #68748b;
+  --color-border: #dfe5ef;
+  --color-border-soft: #edf0f5;
+  --color-accent: #1261ff;
+  --color-accent-strong: #0848ca;
+  --color-accent-soft: #eaf2ff;
   --color-success: #1e6b47;
   --color-success-soft: #eaf5ef;
   --color-warning: #92620a;
@@ -25,7 +25,7 @@
   --color-danger-soft: #f9ecec;
   --color-info: #1f4c73;
   --color-info-soft: #eaf1f7;
-  --color-focus: #4c7aab;
+  --color-focus: #5d91ff;
   --color-overlay: rgba(10, 10, 14, 0.55);
   --color-on-media: #ffffff;
   --color-on-media-muted: rgba(255, 255, 255, 0.8);
@@ -58,19 +58,22 @@
   --text-xl: 22px;
   --text-2xl: 30px;
 
-  --radius-sm: 5px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --radius-sm: 9px;
+  --radius-md: 13px;
+  --radius-lg: 18px;
   --radius-pill: 999px;
-  --shadow-sm: 0 1px 2px rgba(20, 20, 26, 0.06);
-  --shadow-md: 0 10px 30px rgba(20, 20, 26, 0.1);
-  --shadow-lg: 0 24px 64px rgba(15, 15, 20, 0.18);
+  --shadow-sm: 0 1px 2px rgba(31, 51, 84, 0.05), 0 8px 24px rgba(31, 51, 84, 0.035);
+  --shadow-md: 0 16px 40px rgba(31, 51, 84, 0.1);
+  --shadow-lg: 0 30px 80px rgba(24, 45, 80, 0.17);
   --shadow-media-control: 0 5px 18px rgba(0, 0, 0, 0.16);
+  --shadow-subtitle-light: 0 1px 4px rgba(0, 0, 0, 0.58);
+  --shadow-subtitle-strong: -2px -2px 0 rgba(0, 0, 0, 0.9), 2px -2px 0 rgba(0, 0, 0, 0.9), -2px 2px 0 rgba(0, 0, 0, 0.9), 2px 2px 0 rgba(0, 0, 0, 0.9), 0 4px 12px rgba(0, 0, 0, 0.72);
 
   --duration-fast: 150ms;
   --duration-normal: 300ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --app-header-height: 65px;
+  --app-header-height: 58px;
+  --app-rail-width: 112px;
 }
 
 @media (prefers-reduced-motion: reduce) {

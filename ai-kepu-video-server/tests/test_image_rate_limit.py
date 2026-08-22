@@ -1,3 +1,4 @@
+import base64
 from types import SimpleNamespace
 
 import pytest
@@ -97,3 +98,135 @@ def test_image_401_is_wrapped_as_safe_auth_error(tmp_path, monkeypatch):
     assert safe.code.value == "auth"
     assert safe.request_id == "req-image-auth"
     assert secret not in str(exc_info.value)
+
+
+def test_content_policy_rejection_uses_safe_fallback_without_sleep(tmp_path, monkeypatch):
+    calls = []
+    sleeps = []
+
+    class FakeResponse:
+        def __init__(self, status_code, body, headers=None):
+            self.status_code = status_code
+            self._body = body
+            self.headers = headers or {}
+
+        def json(self):
+            return self._body
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise requests.HTTPError("provider rejected request", response=self)
+
+    responses = [
+        FakeResponse(
+            400,
+            {
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "content_policy_violation",
+                    "message": "prompt rejected",
+                    "param": "prompt",
+                }
+            },
+            {"cf-ray": "req-policy-1"},
+        ),
+        FakeResponse(
+            200,
+            {
+                "data": [
+                    {
+                        "b64_json": base64.b64encode(
+                            b"\x89PNG\r\n\x1a\npolicy-fallback"
+                        ).decode()
+                    }
+                ]
+            },
+        ),
+    ]
+
+    def fake_post(_url, *, headers, json, timeout):
+        calls.append(dict(json))
+        return responses.pop(0)
+
+    monkeypatch.setattr(
+        Config,
+        "image_config",
+        classmethod(lambda cls: {
+            "api_url": "https://image.invalid/v1/images/generations",
+            "api_key": "safe-test-key",
+            "model": "fake-image",
+        }),
+    )
+    monkeypatch.setattr(
+        Config,
+        "generation_config",
+        classmethod(lambda cls: {"retry_count": 2, "retry_interval_seconds": 5}),
+    )
+    monkeypatch.setattr(image_generator.requests, "post", fake_post)
+    monkeypatch.setattr(image_generator.time, "sleep", sleeps.append)
+    monkeypatch.setattr(ImageGenerator, "_wait_for_rate_limit", lambda self: None)
+
+    generator = ImageGenerator(str(tmp_path))
+    path = generator.generate(
+        "A hopeful person surrounded by broken chains and flowers",
+        style="油彩画",
+    )
+
+    assert len(calls) == 2
+    assert "broken chains" in calls[0]["prompt"]
+    assert "broken chains" not in calls[1]["prompt"]
+    assert sleeps == []
+    assert path.fallback_used is True
+    assert path.submitted_prompt == calls[1]["prompt"]
+    assert path.requested_prompt == calls[0]["prompt"]
+    assert (tmp_path / "segment_000.png").is_file()
+
+
+def test_non_retryable_bad_request_is_not_replayed(tmp_path, monkeypatch):
+    calls = []
+
+    class BadRequestResponse:
+        status_code = 400
+        headers = {"x-request-id": "req-bad-request"}
+
+        def json(self):
+            return {
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "invalid_size",
+                    "message": "unsupported size",
+                }
+            }
+
+        def raise_for_status(self):
+            raise requests.HTTPError("bad request", response=self)
+
+    monkeypatch.setattr(
+        Config,
+        "image_config",
+        classmethod(lambda cls: {
+            "api_url": "https://image.invalid/v1/images/generations",
+            "api_key": "safe-test-key",
+            "model": "fake-image",
+        }),
+    )
+    monkeypatch.setattr(
+        Config,
+        "generation_config",
+        classmethod(lambda cls: {"retry_count": 5, "retry_interval_seconds": 1}),
+    )
+
+    def fake_post(*_args, **_kwargs):
+        calls.append(1)
+        return BadRequestResponse()
+
+    monkeypatch.setattr(image_generator.requests, "post", fake_post)
+    monkeypatch.setattr(ImageGenerator, "_wait_for_rate_limit", lambda self: None)
+    generator = ImageGenerator(str(tmp_path))
+
+    with pytest.raises(ClassifiedError) as exc_info:
+        generator.generate("safe prompt")
+
+    assert len(calls) == 1
+    assert exc_info.value.safe_error.code.value == "provider_error"
+    assert exc_info.value.safe_error.retryable is False

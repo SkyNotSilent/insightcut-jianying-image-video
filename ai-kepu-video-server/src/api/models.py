@@ -36,6 +36,23 @@ class TTSOptions(BaseModel):
     style_prompt: Optional[str] = Field(None, max_length=300)
 
 
+class SubtitleOptions(BaseModel):
+    """跨即时预览、完整视频和剪映草稿共享的字幕快照。"""
+
+    size: Literal["small", "standard", "large"] = "standard"
+    position: Literal["low", "standard", "high"] = "standard"
+    outline: Literal["light", "standard", "strong"] = "standard"
+
+
+class GenerationOptions(BaseModel):
+    """任务级生成策略；只影响后续生成操作。"""
+
+    prompt_concurrency: int = Field(4, ge=1, le=8)
+    image_concurrency: int = Field(8, ge=1, le=8)
+    retry_count: int = Field(2, ge=0, le=5)
+    retry_interval_seconds: int = Field(5, ge=1, le=60)
+
+
 class RegenerateAudioRequest(BaseModel):
     """单段重配音的 JSON 请求；查询参数仍保留兼容。"""
 
@@ -59,6 +76,10 @@ class CreateTaskRequest(BaseModel):
     script_policy: Literal["rewrite", "verbatim"] = Field(
         default="rewrite", description="文稿处理：rewrite=改写，verbatim=脚本模式保留原文"
     )
+    source_draft_id: Optional[str] = Field(None, max_length=120)
+    template_id: Optional[str] = Field(None, max_length=64)
+    generation_options: Optional[GenerationOptions] = None
+    subtitle_options: Optional[SubtitleOptions] = None
 
 
 class CreateTaskFromImagesRequest(BaseModel):

@@ -15,6 +15,10 @@ const ERROR_COPY = Object.freeze({
     title: '生成服务暂时异常',
     action: '请稍后重试当前项，其他素材保持不变。',
   },
+  content_policy: {
+    title: '画面描述未通过内容检查',
+    action: '请修改当前分镜的生图提示词后，再重新生成这张图片。',
+  },
   network: {
     title: '无法连接生成服务',
     action: '请检查网络连接，恢复后再重试。',
@@ -110,7 +114,7 @@ export function getErrorPresentation(source, { fallbackCode = 'unknown' } = {}) 
     action,
     retryable: typeof metadata.retryable === 'boolean'
       ? metadata.retryable
-      : !['auth', 'disk', 'config_missing', 'conflict', 'cancelled'].includes(code),
+      : !['auth', 'content_policy', 'disk', 'config_missing', 'conflict', 'cancelled'].includes(code),
   }
 }
 

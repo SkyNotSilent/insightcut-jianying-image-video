@@ -76,10 +76,10 @@ def _wait_for_llm_throttle() -> None:
         time.sleep(remaining)
 
 
-def _run_completion_with_retries(completion, kwargs):
+def _run_completion_with_retries(completion, kwargs, generation_config=None):
     """Use sensitive request state internally and return only safe values."""
 
-    generation_config = Config.generation_config()
+    generation_config = generation_config or Config.generation_config()
     retry_count = int(generation_config.get("retry_count", 2))
     retry_interval = max(
         1, min(60, int(generation_config.get("retry_interval_seconds", 5)))
@@ -123,8 +123,13 @@ def _raise_safe_llm_failure(safe_error):
 class ArticleGenerator:
     """文章生成器 - 基于 LLM API"""
 
-    def __init__(self, config_path: str = "config/prompts/article_generation.json"):
+    def __init__(
+        self,
+        config_path: str = "config/prompts/article_generation.json",
+        generation_config: dict = None,
+    ):
         self.config_path = Path(config_path)
+        self.generation_config = generation_config or Config.generation_config()
         self.prompt_config = self._load_config()
         self.llm_config = Config.llm_config()
         self.provider = self.llm_config.get("provider") or "custom"
@@ -189,7 +194,7 @@ class ArticleGenerator:
 
         kwargs = self._build_completion_kwargs(messages, max_tokens)
         content, failure = _run_completion_with_retries(
-            litellm.completion, kwargs
+            litellm.completion, kwargs, self.generation_config
         )
 
         # The public exception traceback includes this frame. Clear every

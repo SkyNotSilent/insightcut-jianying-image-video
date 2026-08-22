@@ -75,6 +75,8 @@
   min-width: 0;
   color: var(--color-ink-muted);
 }
+.workspace-stage-navigation li > button { display: contents; color: inherit; border: 0; background: transparent; cursor: pointer; }
+.workspace-stage-navigation li > button:disabled { cursor: not-allowed; }
 
 .workspace-stage-navigation li:not(:last-child)::after {
   position: absolute;
@@ -86,7 +88,7 @@
   background: var(--color-border);
 }
 
-.workspace-stage-navigation li > span {
+.workspace-stage-navigation li > button > span {
   position: relative;
   z-index: 1;
   display: grid;
@@ -100,7 +102,7 @@
   transition: color .2s ease, border-color .2s ease, background .2s ease, transform .2s ease;
 }
 
-.workspace-stage-navigation li > div {
+.workspace-stage-navigation li > button > div {
   position: relative;
   z-index: 1;
   display: flex;
@@ -123,10 +125,10 @@
 .workspace-stage-navigation li strong { font-size: 10px; }
 .workspace-stage-navigation li small { font-size: 8px; }
 .workspace-stage-navigation li.is-completed { color: var(--color-success); }
-.workspace-stage-navigation li.is-completed > span { color: var(--color-surface-raised); border-color: var(--color-success); background: var(--color-success); }
+.workspace-stage-navigation li.is-completed > button > span { color: var(--color-surface-raised); border-color: var(--color-success); background: var(--color-success); }
 .workspace-stage-navigation li.is-completed::after { background: color-mix(in srgb, var(--color-success) 52%, var(--color-surface-raised)); }
 .workspace-stage-navigation li.is-current { color: var(--color-accent-strong); }
-.workspace-stage-navigation li.is-current > span { color: var(--color-surface-raised); border-color: var(--color-accent); background: var(--color-accent); box-shadow: 0 0 0 4px var(--workspace-accent-ring); transform: scale(1.04); }
+.workspace-stage-navigation li.is-current > button > span { color: var(--color-surface-raised); border-color: var(--color-accent); background: var(--color-accent); box-shadow: 0 0 0 4px var(--workspace-accent-ring); transform: scale(1.04); }
 
 .workspace-global-progress { display: grid; min-width: 0; gap: 7px; }
 .workspace-global-progress > span { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
@@ -350,6 +352,12 @@
   text-align: center;
   text-shadow: 0 2px 9px color-mix(in srgb, black 82%, transparent);
 }
+.workspace-subtitle.is-size-small { font-size: clamp(11px, .9vw, 14px); }
+.workspace-subtitle.is-size-large { font-size: clamp(15px, 1.25vw, 20px); }
+.workspace-subtitle.is-position-low { bottom: 8px; }
+.workspace-subtitle.is-position-high { bottom: 54px; }
+.workspace-subtitle.is-outline-light { text-shadow: var(--shadow-subtitle-light); }
+.workspace-subtitle.is-outline-strong { text-shadow: var(--shadow-subtitle-strong); }
 
 .workspace-player-controls {
   justify-content: center;
@@ -984,12 +992,13 @@ button.workspace-preview-row:hover { background: var(--color-accent-soft); }
 .workspace-preview-row > span.is-stale { color: var(--color-warning); background: var(--color-warning-soft); }
 .workspace-preview-row.is-skeleton { pointer-events: none; }
 
-.workspace-inspector-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; height: 48px; padding: 7px; border-bottom: 1px solid var(--color-border-soft); background: var(--color-surface-muted); }
+.workspace-inspector-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; height: 52px; padding: 7px; border-bottom: 1px solid var(--color-border-soft); background: var(--color-surface-muted); }
 .workspace-inspector-tabs button { position: relative; border: 0; border-radius: 6px; color: var(--color-ink-muted); background: transparent; font-size: 11px; font-weight: 750; cursor: pointer; transition: color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out); }
 .workspace-inspector-tabs button.is-active { color: var(--color-accent); background: var(--color-surface-raised); box-shadow: 0 1px 4px color-mix(in srgb, var(--color-ink) 10%, transparent); }
 .workspace-inspector-tabs button i { position: absolute; top: 6px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-warning); box-shadow: 0 0 0 3px var(--workspace-warning-ring); }
 .workspace-segment-inspector,
-.workspace-settings-panel { height: calc(100% - 48px); overflow-y: auto; padding: 16px 14px 28px; scrollbar-gutter: stable; animation: workspaceInspectorIn var(--duration-fast) var(--ease-out) both; }
+.workspace-settings-panel { height: calc(100% - 52px); overflow-y: auto; padding: 16px 14px 28px; scrollbar-gutter: stable; animation: workspaceInspectorIn var(--duration-fast) var(--ease-out) both; }
+.workspace-asset-library-panel { height: calc(100% - 52px); overflow-y: auto; padding: 16px 14px 28px; scrollbar-gutter: stable; animation: workspaceInspectorIn var(--duration-fast) var(--ease-out) both; }
 .workspace-settings-panel > header button { display: none; }
 .workspace-inspector-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .workspace-inspector-heading > div:first-child > span { color: var(--color-ink-muted); font-size: 10px; font-weight: 750; }
@@ -1024,6 +1033,21 @@ button.workspace-preview-row:hover { background: var(--color-accent-soft); }
 .workspace-inspector-history .asset-history-rail { gap: 8px; }
 .workspace-inspector-history .asset-history-rail > li { width: 154px; flex-basis: 154px; }
 .workspace-inspector-history .asset-history-preview { height: 72px; }
+.workspace-asset-kind-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 10px; background: var(--color-surface-muted); }
+.workspace-asset-kind-tabs button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--color-ink-muted); border: 0; border-radius: 8px; background: transparent; cursor: pointer; font-size: 10px; font-weight: 750; }
+.workspace-asset-kind-tabs button.is-active { color: var(--color-accent); background: var(--color-surface-raised); box-shadow: var(--shadow-sm); }
+.workspace-library-guidance { margin: 12px 0; color: var(--color-ink-muted); font-size: 10px; line-height: 1.55; }
+.workspace-asset-library-panel .asset-history { margin-top: 12px; }
+.workspace-asset-library-panel .asset-history-rail { grid-template-columns: 1fr; }
+.workspace-asset-library-panel .asset-history-preview audio { width: 100%; max-width: 124px; height: 30px; }
+.workspace-project-library-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 14px; padding: 10px; color: var(--color-ink-muted); border-radius: 10px; background: var(--color-surface-muted); font-size: 10px; line-height: 1.5; }
+.workspace-subtitle-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.workspace-subtitle-options label { min-width: 0; display: grid; gap: 5px; color: var(--color-ink-muted); font-size: 9px; }
+.workspace-subtitle-options select { width: 100%; height: 34px; padding: 0 7px; border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-ink-soft); background: var(--color-surface-raised); font-size: 10px; }
+.workspace-template-apply { margin-top: 0; padding-top: 0; border-top: 0; }
+.workspace-template-apply > div:last-child { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.workspace-template-apply select { min-width: 0; height: 36px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-ink-soft); background: var(--color-surface-raised); font-size: 10px; }
+.workspace-template-apply .button { min-height: 36px; padding-inline: 11px; }
 .workspace-inspector-skeleton { display: grid; gap: 12px; padding-top: 6px; }
 .workspace-inspector-skeleton i:nth-child(1) { width: 38%; }
 .workspace-inspector-skeleton i:nth-child(2) { height: 96px; }
@@ -1046,9 +1070,9 @@ button.workspace-preview-row:hover { background: var(--color-accent-soft); }
   .production-workspace { --workspace-guide: 66px; height: calc(100dvh - 64px); min-height: 0; overflow: hidden; padding: calc(48px + var(--workspace-guide)) 0 var(--workspace-footer); }
   .workspace-stage-navigation { top: 48px; grid-template-columns: 1fr 72px; height: var(--workspace-guide); gap: 8px; padding: 7px 9px; }
   .workspace-stage-navigation li { grid-template-columns: 19px minmax(0, 1fr); gap: 4px; }
-  .workspace-stage-navigation li > span { width: 19px; height: 19px; font-size: 8px; }
+  .workspace-stage-navigation li > button > span { width: 19px; height: 19px; font-size: 8px; }
   .workspace-stage-navigation li:not(:last-child)::after { top: 9px; right: 3px; left: 22px; }
-  .workspace-stage-navigation li > div { padding: 0; }
+  .workspace-stage-navigation li > button > div { padding: 0; }
   .workspace-stage-navigation li small { display: none; }
   .workspace-stage-navigation li strong { font-size: 8px; }
   .workspace-global-progress > span { justify-content: flex-end; }
@@ -1062,7 +1086,8 @@ button.workspace-preview-row:hover { background: var(--color-accent-soft); }
   .workspace-settings,
   .workspace-settings.is-open { padding: 0; }
   .workspace-segment-inspector,
-  .workspace-settings-panel { height: calc(100% - 48px); overflow-y: auto; padding: 14px 12px 28px; }
+  .workspace-settings-panel,
+  .workspace-asset-library-panel { height: calc(100% - 52px); overflow-y: auto; padding: 14px 12px 28px; }
   .workspace-canvas { width: min(100%, 620px); }
   .workspace-preview-row { grid-template-columns: 28px minmax(110px, 1fr) 54px 48px 44px 44px; gap: 4px; }
   .workspace-actionbar { min-height: var(--workspace-footer); }
@@ -1086,7 +1111,8 @@ button.workspace-preview-row:hover { background: var(--color-accent-soft); }
   .workspace-failure-count,
   .workspace-save-state.is-saving svg,
   .workspace-segment-inspector,
-  .workspace-settings-panel { animation: none !important; }
+  .workspace-settings-panel,
+  .workspace-asset-library-panel { animation: none !important; }
   .workspace-save-state,
   .workspace-save-state svg,
   .workspace-inspector-tabs button { transition: none !important; }

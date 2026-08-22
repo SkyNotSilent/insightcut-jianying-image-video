@@ -30,15 +30,15 @@ class RenderCancelled(RuntimeError):
     """Raised at a safe render checkpoint after the caller requests cancel."""
 
 
-def _load_render_config(config_path: str = "config/settings.json", canvas_override: Optional[dict] = None) -> dict:
+def _load_render_config(config_path: str = "config/settings.json", canvas_override: Optional[dict] = None, subtitle_options: Optional[dict] = None) -> dict:
     cfg = FFmpegExporter._load_config(config_path)
     canvas = {**cfg.get("canvas", {}), **(canvas_override or {})}
     width = canvas.get("width", 1920)
     height = canvas.get("height", 1080)
     fps = canvas.get("fps", 30)
-    subtitle_preset = subtitle_preset_for_canvas(width, height)
+    subtitle_preset = subtitle_preset_for_canvas(width, height, subtitle_options)
     fontsize = int(height * subtitle_preset["font_size_ratio"])
-    border_width = 0
+    border_width = int(subtitle_preset.get("border_width") or 0)
 
     return {
         "pipeline_version": RENDER_PIPELINE_VERSION,
@@ -92,9 +92,9 @@ def build_animation_params(segment_count: int, animation_seed: Optional[int] = N
 class FFmpegExporter:
     """FFmpeg 视频导出器"""
 
-    def __init__(self, config_path: str = "config/settings.json", canvas: Optional[dict] = None):
+    def __init__(self, config_path: str = "config/settings.json", canvas: Optional[dict] = None, subtitle_options: Optional[dict] = None):
         self._cfg = self._load_config(config_path)
-        self.render_config = _load_render_config(config_path, canvas)
+        self.render_config = _load_render_config(config_path, canvas, subtitle_options)
         canvas = self.render_config["canvas"]
         self.width = canvas["width"]
         self.height = canvas["height"]
@@ -109,8 +109,8 @@ class FFmpegExporter:
         self._font = self._find_font(ff_cfg.get("font_path"))
 
     @staticmethod
-    def get_render_config(config_path: str = "config/settings.json", canvas: Optional[dict] = None) -> dict:
-        return _load_render_config(config_path, canvas)
+    def get_render_config(config_path: str = "config/settings.json", canvas: Optional[dict] = None, subtitle_options: Optional[dict] = None) -> dict:
+        return _load_render_config(config_path, canvas, subtitle_options)
 
     # ── 初始化辅助 ─────────────────────────────────────────────────
 

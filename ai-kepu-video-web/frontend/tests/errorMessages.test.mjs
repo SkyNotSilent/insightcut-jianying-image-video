@@ -14,6 +14,18 @@ test('stable error codes use consistent titles and actionable copy', () => {
   assert.equal(errorToastMessage({ error_code: 'auth' }), `${auth.title}；${auth.action}`)
 })
 
+test('content policy failures ask for a prompt edit instead of a blind retry', () => {
+  const presentation = getErrorPresentation({
+    error_code: 'content_policy',
+    error_meta: { retryable: false },
+  })
+
+  assert.equal(presentation.code, 'content_policy')
+  assert.equal(presentation.title, '画面描述未通过内容检查')
+  assert.match(presentation.action, /修改当前分镜的生图提示词/)
+  assert.equal(presentation.retryable, false)
+})
+
 test('HTTP and network failures map without relying on backend detail', () => {
   assert.equal(getErrorPresentation({ response: { status: 409 } }).code, 'conflict')
   assert.equal(getErrorPresentation({ kind: 'network' }).code, 'network')
@@ -29,4 +41,3 @@ test('unknown backend detail is never rendered directly', () => {
   assert.equal(rendered.includes(secretDetail), false)
   assert.equal(rendered.includes('SECRET-DO-NOT-RENDER'), false)
 })
-

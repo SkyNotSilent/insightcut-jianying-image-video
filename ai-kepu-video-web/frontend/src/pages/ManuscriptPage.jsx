@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, ClipboardPaste, FileUp, Sparkles } from 'lucide-react'
-import { useNavigate, useParams } from 'react-router'
-import { createTask, extractDocumentText, getConfigReadiness } from '../api/task'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
+import { createTask, extractDocumentText, getConfigReadiness, listProductionTemplates } from '../api/task'
 import { Modal } from '../components/Modal'
 import { EmptyStateCard } from '../components/ui/EmptyStateCard'
 import { VisualStyleCard } from '../components/ui/VisualStyleCard'
@@ -21,7 +21,11 @@ const rotatorItems = [
 const rotatorDurations = [3200, 3000, 3500, 3200, 3400]
 
 function createInitialDraft(draftId) {
-  return getDraft(draftId) || (!draftId && getLatestDraft()) || createDraft({ visual_style: '吉卜力', text_style: '知识科普' })
+  if (draftId) return getDraft(draftId) || createDraft({ visual_style: '吉卜力', text_style: '知识科普' })
+  const latest = getLatestDraft()
+  return latest && !latest.created_task_id
+    ? latest
+    : createDraft({ visual_style: '吉卜力', text_style: '知识科普' })
 }
 
 function normalizeTitle(value) {
@@ -45,6 +49,7 @@ function readLastTtsOptions() {
 
 export function ManuscriptPage() {
   const { draftId } = useParams()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const [draft, setDraft] = useState(() => createInitialDraft(draftId))
   const draftRef = useRef(draft)
@@ -103,6 +108,32 @@ export function ManuscriptPage() {
     return next
   }
 
+  useEffect(() => {
+    const templateId = searchParams.get('template')
+    if (templateId && draftRef.current.template_id === templateId) return
+    if (!templateId && draftRef.current.template_id) return
+    let alive = true
+    listProductionTemplates().then(result => {
+      if (!alive) return
+      const template = templateId
+        ? (result?.items || []).find(item => item.template_id === templateId)
+        : (result?.items || []).find(item => item.is_default)
+      if (!template) return
+      patchDraft({
+        template_id: template.template_id,
+        text_style: template.text_style,
+        visual_style: template.visual_style,
+        ratio: template.ratio,
+        template_voice_type: template.voice_type,
+        template_tts_options: template.tts_options,
+        subtitle_options: template.subtitle_options,
+        generation_options: template.generation_options,
+      })
+      if (templateId) toast.success(`已应用生产模板“${template.name}”`)
+    })
+    return () => { alive = false }
+  }, [searchParams])
+
   const insertExample = () => {
     const direction = normalizeTitle(draftRef.current.name || draftRef.current.manuscript) || '普通人为什么越来越需要 AI 助手'
     const next = {
@@ -126,10 +157,14 @@ export function ManuscriptPage() {
         style: `${prepared.text_style || '知识科普'}|${prepared.visual_style || '吉卜力'}`,
         ratio: prepared.ratio || '16:9',
         length: inputMode === 'theme' ? normalizeLength(prepared.length) : 0,
-        voice_type: voiceType || undefined,
-        tts_options: readLastTtsOptions(),
+        voice_type: prepared.template_voice_type || voiceType || undefined,
+        tts_options: prepared.template_tts_options || readLastTtsOptions(),
         execution_mode: 'review_first',
-        script_policy: 'verbatim',
+        script_policy: inputMode === 'script' ? 'verbatim' : 'rewrite',
+        source_draft_id: prepared.draft_id,
+        template_id: prepared.template_id || undefined,
+        generation_options: prepared.generation_options || undefined,
+        subtitle_options: prepared.subtitle_options || undefined,
       })
       const saved = { ...prepared, created_task_id: result.task_id }
       draftRef.current = saved
