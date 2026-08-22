@@ -292,7 +292,7 @@ export function ProjectAssetsPage() {
                   </button>
                   <div className="asset-project-actions">
                     <button className="asset-project-menu icon-button" type="button" title="项目操作" aria-label={`${project.name} 的项目操作`} aria-expanded={openMenuId === project.id} onClick={() => setOpenMenuId(current => current === project.id ? null : project.id)}><MoreHorizontal size={18} aria-hidden="true" /></button>
-                    {openMenuId === project.id ? <div className="asset-project-popover" role="menu"><button type="button" role="menuitem" onClick={() => selectDelete(project)}><Trash2 size={15} aria-hidden="true" />{project.type === 'draft' ? '删除草稿' : '删除项目'}</button></div> : null}
+                    {openMenuId === project.id ? <div className="asset-project-popover" role="menu">{project.type === 'task' ? <button type="button" role="menuitem" onClick={() => navigate(`/assets/${project.id}`)}><FileText size={15} aria-hidden="true" />查看项目素材</button> : null}<button type="button" role="menuitem" onClick={() => selectDelete(project)}><Trash2 size={15} aria-hidden="true" />{project.type === 'draft' ? '删除草稿' : '删除项目'}</button></div> : null}
                   </div>
                 </article>
               )

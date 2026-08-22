@@ -567,6 +567,27 @@ export function WorkspacePage() {
     writeWorkspaceView(taskId, { selectedIndex: safe })
   }, [taskId])
 
+  useEffect(() => {
+    if (!workspace) return
+    const focus = Number(new URLSearchParams(location.search).get('focus'))
+    if (focus === 2) previewScrollRef.current?.scrollTo({ top: 0 })
+    if (focus === 3) {
+      setWorkspaceSettingsOpen(true)
+      if (window.matchMedia?.('(max-width: 780px)').matches) selectMobilePane('settings')
+    }
+    if (focus === 4) {
+      setWorkspaceSettingsOpen(false)
+      if (window.matchMedia?.('(max-width: 780px)').matches) selectMobilePane('storyboard')
+    }
+    if (focus === 5) {
+      const target = workspace.segments.findIndex(segment => (
+        ['pending', 'processing', 'failed', 'stale'].includes(segment.image_status)
+        || ['pending', 'processing', 'failed', 'stale'].includes(segment.audio_status)
+      ))
+      if (target >= 0) selectSegment(target)
+    }
+  }, [location.search, selectSegment, workspace?.task_id])
+
   const stopPlayback = useCallback(({ naturalEnd = false } = {}) => {
     playbackRunRef.current += 1
     playbackEndedNaturallyRef.current = naturalEnd
@@ -771,13 +792,18 @@ export function WorkspacePage() {
   const saveRuntimeConfig = async () => {
     const normalized = normalizeRuntimeConfig(runtimeConfig)
     setRuntimeConfig(normalized)
-    setBusyAction('runtime')
     try {
+      const taskSaved = await saveWorkspaceSettings({
+        generation_options: normalized,
+        voice_confirmed: voiceReady,
+      })
+      if (!taskSaved) return
+      setBusyAction('runtime')
       const saved = await updateConfig({ generation: normalized })
       const next = normalizeRuntimeConfig(saved?.generation || normalized)
       setRuntimeConfig(next)
       localStorage.setItem(LAST_RUNTIME_KEY, JSON.stringify(next))
-      toast.success('生成策略已保存，将作为后续项目和重试的默认值')
+      toast.success('项目生成策略已保存，并设为后续项目默认值')
     } catch (error) {
       toast.error(errorToastMessage(error))
     } finally {
@@ -1082,8 +1108,35 @@ export function WorkspacePage() {
     else setWorkspaceSettingsOpen(false)
   }
 
+  const navigateJourneyStep = (_step, index) => {
+    if (index === 0) {
+      navigate(workspace.source_draft_id ? `/manuscript/${workspace.source_draft_id}` : '/manuscript')
+      return
+    }
+    if (index === 1) {
+      previewScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    if (index === 2) {
+      setWorkspaceSettingsOpen(true)
+      if (window.matchMedia?.('(max-width: 780px)').matches) selectMobilePane('settings')
+      return
+    }
+    if (index === 3) {
+      setWorkspaceSettingsOpen(false)
+      if (window.matchMedia?.('(max-width: 780px)').matches) selectMobilePane('storyboard')
+      return
+    }
+    if (index === 4) {
+      const target = segments.findIndex(segment => ['pending', 'processing', 'failed', 'stale'].includes(segment.image_status) || ['pending', 'processing', 'failed', 'stale'].includes(segment.audio_status))
+      if (target >= 0) selectSegment(target)
+      return
+    }
+    if (index === 5) navigate(`/export/${taskId}`)
+  }
+
   return <main className={`production-workspace${settingsOpen ? ' is-settings-open' : ''}`} data-mobile-pane={mobilePane}>
-    <WorkspaceStageNavigator journey={journey} onHelp={() => setTourOpen(true)} />
+    <WorkspaceStageNavigator journey={journey} onHelp={() => setTourOpen(true)} onNavigate={navigateJourneyStep} />
     <div className="workspace-polling-notices">
       {workspacePolling.error ? <PollingFailureNotice
         title="工作台连接已中断"
@@ -1136,7 +1189,7 @@ export function WorkspacePage() {
                   <strong>{currentSegment?.image_prompt ? '画面等待生成' : '正在准备画面描述'}</strong>
                   <small>{workspace.visual_style} · {workspace.ratio}</small>
                 </div>}
-          {previewMode === 'content' ? <p className="workspace-subtitle">{normalizeSubtitleText(currentSegment?.text || '分镜文案生成后会显示在这里')}</p> : null}
+          {previewMode === 'content' ? <p className={`workspace-subtitle is-size-${workspace.subtitle_options?.size || 'standard'} is-position-${workspace.subtitle_options?.position || 'standard'} is-outline-${workspace.subtitle_options?.outline || 'standard'}`}>{normalizeSubtitleText(currentSegment?.text || '分镜文案生成后会显示在这里')}</p> : null}
         </section>
 
         <div className="workspace-player-controls">
@@ -1212,6 +1265,7 @@ export function WorkspacePage() {
       />
 
       <WorkspaceInspector
+        taskId={taskId}
         segmentScrollRef={segmentInspectorScrollRef}
         settingsScrollRef={fullSettingsScrollRef}
         onSegmentScroll={event => rememberPaneScroll('segmentInspector', event)}
@@ -1258,6 +1312,7 @@ export function WorkspacePage() {
         normalizeRuntime={normalizeRuntimeConfig}
         onSaveRuntime={saveRuntimeConfig}
         onOpenApi={() => navigate(`/workspace/${taskId}/settings`)}
+        onAssetSelected={() => workspacePolling.refresh()}
       />
     </div>
 

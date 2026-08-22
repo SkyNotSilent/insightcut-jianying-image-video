@@ -295,6 +295,13 @@ export function deleteTask(taskId, { deleteFiles = true } = {}) {
   })
 }
 
+export function cancelTask(taskId) {
+  return request({
+    url: `/ai/native/video/kepu/tasks/${taskId}/cancel`,
+    method: 'post',
+  })
+}
+
 /**
  * 获取任务段落列表
  * @param {string} taskId - 任务ID
@@ -380,11 +387,27 @@ export function getTaskAssets(taskId, params = {}) {
   })
 }
 
-export function selectSegmentImage(taskId, segmentIndex, assetId) {
+export function selectSegmentImage(taskId, segmentIndex, assetId, snapshotKey = '') {
   return request({
     url: `/ai/native/video/kepu/tasks/${taskId}/segments/${segmentIndex}/select-image`,
     method: 'post',
-    data: { asset_id: assetId }
+    data: { asset_id: assetId, snapshot_key: snapshotKey }
+  })
+}
+
+export function getAssetLibrary(taskId, params = {}) {
+  return request({
+    url: `/ai/native/video/kepu/tasks/${taskId}/asset-library`,
+    method: 'get',
+    params,
+  })
+}
+
+export function selectSegmentAsset(taskId, segmentIndex, data) {
+  return request({
+    url: `/ai/native/video/kepu/tasks/${taskId}/segments/${segmentIndex}/select-asset`,
+    method: 'post',
+    data,
   })
 }
 
@@ -492,4 +515,29 @@ export function listTasks(status, limit = 20, offset = 0) {
     method: 'get',
     params: { status, limit, offset }
   })
+}
+
+export function getTaskActivity({ signal } = {}) {
+  return request({
+    url: '/ai/native/video/kepu/activity/tasks',
+    method: 'get',
+    suppressToast: true,
+    signal,
+  })
+}
+
+export function listProductionTemplates() {
+  return request({ url: '/ai/native/video/kepu/templates', method: 'get' })
+}
+
+export function createProductionTemplate(data) {
+  return request({ url: '/ai/native/video/kepu/templates', method: 'post', data })
+}
+
+export function updateProductionTemplate(templateId, data) {
+  return request({ url: `/ai/native/video/kepu/templates/${templateId}`, method: 'patch', data })
+}
+
+export function deleteProductionTemplate(templateId) {
+  return request({ url: `/ai/native/video/kepu/templates/${templateId}`, method: 'delete' })
 }

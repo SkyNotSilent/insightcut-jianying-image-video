@@ -20,7 +20,7 @@
 .length-control { display: grid; grid-template-columns: minmax(0, 1fr) 78px; gap: 10px; align-items: center; }
 .length-control > input { width: 100%; accent-color: var(--color-accent); }
 .length-number input { text-align: center; }
-.summary-strip { display: grid; gap: 5px; padding: 13px; border-left: 3px solid var(--color-accent); background: var(--color-info-soft); }
+.summary-strip { display: grid; gap: 5px; padding: 13px; border: 1px solid color-mix(in srgb, var(--color-accent) 22%, var(--color-border)); border-radius: var(--radius-sm); background: var(--color-info-soft); }
 .summary-strip span, .summary-strip strong { font-size: 13px; }
 .summary-strip strong { color: var(--color-accent-strong); }
 .writing-canvas { min-height: calc(100vh - 116px); display: flex; flex-direction: column; overflow: hidden; }
