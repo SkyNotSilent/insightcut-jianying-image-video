@@ -1,4 +1,4 @@
-import { AudioLines, RefreshCw, RotateCcw } from 'lucide-react'
+import { RefreshCw, RotateCcw } from 'lucide-react'
 import { getErrorPresentation } from '../../lib/errorMessages'
 import { AssetStatus } from './assetState'
 import './asset-components.css'
@@ -41,16 +41,6 @@ export function AudioCard({
 
   return (
     <article className={`asset-card audio-asset-card is-${status}${className ? ` ${className}` : ''}`}>
-      <div className="audio-asset-visual">
-        <span className="audio-asset-glyph" aria-hidden="true"><AudioLines size={22} /></span>
-        <span className="audio-waveform" aria-hidden="true">
-          {[12, 25, 18, 34, 22, 42, 27, 17, 37, 23, 31, 15].map((height, index) => (
-            <i key={index} style={{ '--wave-height': `${height}px` }} />
-          ))}
-        </span>
-        {status === 'generating' ? <span className="asset-card-scan" aria-hidden="true" /> : null}
-      </div>
-
       <div className="asset-card-copy">
         <div className="asset-card-heading">
           <div>

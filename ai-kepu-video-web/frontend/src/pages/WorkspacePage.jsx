@@ -6,12 +6,10 @@ import {
   CircleAlert,
   Clock3,
   ImageOff,
-  History,
   LoaderCircle,
   Pause,
   Play,
   RefreshCw,
-  Settings2,
   Sparkles,
   Upload,
   WandSparkles,
@@ -47,9 +45,6 @@ import { WorkspaceInspector } from '../components/WorkspaceInspector'
 import { WorkspaceSettingsOverlay } from '../components/WorkspaceSettingsOverlay'
 import { WorkspaceStoryboardNav } from '../components/WorkspaceStoryboardNav'
 import { WorkspaceStageNavigator } from '../components/WorkspaceStageNavigator'
-import { AssetHistory } from '../components/ui/AssetHistory'
-import { AudioCard } from '../components/ui/AudioCard'
-import { ImageCard } from '../components/ui/ImageCard'
 import { Lightbox } from '../components/ui/Lightbox'
 import { usePollingResource } from '../hooks/usePollingResource'
 import { errorToastMessage, getErrorPresentation } from '../lib/errorMessages'
@@ -193,21 +188,6 @@ function formatEstimate(estimate) {
   const min = Math.max(1, Math.ceil(Number(estimate?.min_seconds || 0) / 60))
   const max = Math.max(min, Math.ceil(Number(estimate?.max_seconds || 0) / 60))
   return `${min}–${max} 分钟`
-}
-
-function assetCardStatus(status) {
-  return ({
-    completed: 'complete',
-    processing: 'generating',
-    pending: 'waiting',
-    failed: 'failed',
-    stale: 'stale',
-  })[status] || 'waiting'
-}
-
-function cssAspectRatio(ratio) {
-  const [width, height] = String(ratio || '16:9').split(':').map(Number)
-  return width > 0 && height > 0 ? `${width} / ${height}` : '16 / 9'
 }
 
 function historyTimestamp(value) {
@@ -1181,57 +1161,6 @@ export function WorkspacePage() {
           {stage.tone === 'warning' ? <AlertTriangle size={17} /> : stage.tone === 'working' ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />}
           <div><strong>{stage.title}</strong><p>{stage.description}</p></div>
         </section>
-        {currentSegment ? <section className="workspace-current-assets" aria-label={`分镜 ${selectedIndex + 1} 素材`}>
-          <header>
-            <div><span>当前分镜素材</span><strong>画面与配音</strong></div>
-            <small>所有替换版本都会保留</small>
-          </header>
-          <div className="workspace-current-asset-grid">
-            <ImageCard
-              status={operationTarget(currentSegment, 'image') || busyAction === `image:${currentSegment.segment_index}` || busyAction === `upload:${currentSegment.segment_index}` || busyAction === `history:${currentSegment.segment_index}` ? 'generating' : assetCardStatus(currentSegment.image_status)}
-              ratio={cssAspectRatio(workspace.ratio)}
-              src={imageUrl}
-              alt={`分镜 ${selectedIndex + 1} 画面`}
-              eyebrow={`FRAME ${String(selectedIndex + 1).padStart(2, '0')}`}
-              title="画面素材"
-              meta={`${workspace.visual_style} · ${workspace.ratio}`}
-              error={{ error_code: currentSegment.image_error_code, error_meta: currentSegment.image_error_meta }}
-              onOpen={imageUrl ? () => openLightboxForSegment(currentSegment) : undefined}
-              onRetry={editable && currentSegment.prompt_status === 'completed' && currentSegment.image_prompt ? () => regenerateOne(currentSegment, 'image') : undefined}
-              onRegenerate={editable && currentSegment.prompt_status === 'completed' && currentSegment.image_prompt ? () => regenerateOne(currentSegment, 'image') : undefined}
-              onUpdate={editable && currentSegment.prompt_status === 'completed' && currentSegment.image_prompt ? () => regenerateOne(currentSegment, 'image') : undefined}
-              actions={<>
-                <button type="button" className="asset-text-action" disabled={!editable || Boolean(busyAction)} onClick={() => requestImageUpload(currentSegment)}><Upload size={14} aria-hidden="true" />上传替换</button>
-                <button type="button" className="asset-text-action" disabled={Boolean(busyAction)} onClick={() => toggleImageHistory(currentSegment)}><History size={14} aria-hidden="true" />历史版本</button>
-              </>}
-            />
-            <AudioCard
-              status={operationTarget(currentSegment, 'audio') || busyAction === `audio:${currentSegment.segment_index}` ? 'generating' : assetCardStatus(currentSegment.audio_status)}
-              src={normalizeMediaUrl(currentSegment.audio_url)}
-              eyebrow={`VOICE ${String(selectedIndex + 1).padStart(2, '0')}`}
-              title="分镜配音"
-              voiceLabel={voiceName(voices, currentSegment.audio_voice_type || workspace.voice_type)}
-              duration={secondsToLabel(segmentDuration(currentSegment))}
-              transcript={normalizeSubtitleText(currentSegment.text)}
-              error={{ error_code: currentSegment.audio_error_code, error_meta: currentSegment.audio_error_meta }}
-              onPlay={() => { stopPlayback(); fullVideoRef.current?.pause() }}
-              onRetry={editable ? () => regenerateOne(currentSegment, 'audio') : undefined}
-              onRegenerate={editable ? () => regenerateOne(currentSegment, 'audio') : undefined}
-              onUpdate={editable ? () => regenerateOne(currentSegment, 'audio') : undefined}
-              actions={<button type="button" className="asset-text-action" disabled={!editable || Boolean(busyAction)} onClick={() => { setWorkspaceSettingsOpen(true); if (window.matchMedia?.('(max-width: 780px)').matches) selectMobilePane('settings') }}><Settings2 size={14} aria-hidden="true" />换音色重配</button>}
-            />
-          </div>
-          {currentSegment.image_storage_warning || currentSegment.audio_storage_warning ? <div className="workspace-storage-warning" role="status"><AlertTriangle size={15} /><span><strong>素材可用，但本地归档未完成</strong><small>源文件仍可预览和完成生产；请检查磁盘空间或目录权限。</small></span></div> : null}
-          {historySegmentIndex === currentSegment.segment_index ? <div className="workspace-current-history">
-            <AssetHistory
-              versions={currentHistoryVersions}
-              selectedId={selectedHistoryId}
-              emptyMessage={historyLoading ? '正在读取历史版本…' : '这个分镜还没有可回选的图片版本'}
-              onSelect={busyAction ? undefined : chooseHistoryVersion}
-              onRestore={busyAction ? undefined : chooseHistoryVersion}
-            />
-          </div> : null}
-        </section> : null}
         <WorkspaceFailureBanner
           issues={workspaceIssues}
           busy={Boolean(busyAction) || operationRunning}
@@ -1303,6 +1232,16 @@ export function WorkspacePage() {
         busyAction={busyAction}
         onRegenerate={regenerateOne}
         onRegeneratePrompt={regeneratePrompt}
+        imageUrl={imageUrl}
+        imageHistoryOpen={Boolean(currentSegment && historySegmentIndex === currentSegment.segment_index)}
+        imageHistoryVersions={currentHistoryVersions}
+        selectedHistoryId={selectedHistoryId}
+        historyLoading={historyLoading}
+        onOpenImage={() => currentSegment && openLightboxForSegment(currentSegment)}
+        onUploadImage={() => currentSegment && requestImageUpload(currentSegment)}
+        onToggleImageHistory={() => currentSegment && toggleImageHistory(currentSegment)}
+        onSelectHistoryVersion={chooseHistoryVersion}
+        storageWarning={Boolean(currentSegment?.image_storage_warning || currentSegment?.audio_storage_warning)}
         selectedVoice={selectedVoice}
         ttsOptions={ttsOptions}
         onVoiceChange={id => { stopVoicePreview(); setSelectedVoice(id); setTtsOptions(mergeTtsOptions({}, workspace.tts_options || {}, id.startsWith('doubao:') ? 'doubao' : 'mimo')) }}

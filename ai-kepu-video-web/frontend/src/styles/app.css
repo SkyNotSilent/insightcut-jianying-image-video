@@ -29,7 +29,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .brand small { color: var(--color-ink-muted); font-size: var(--text-sm); line-height: 1.2; }
 .brand-mark { position: relative; isolation: isolate; width: 36px; height: 36px; flex: 0 0 auto; overflow: hidden; border-radius: var(--radius-md); background: var(--color-canvas); transition: box-shadow var(--duration-normal) var(--ease-out); }
 .brand-mark:hover { box-shadow: 0 0 16px color-mix(in srgb, var(--color-accent) 42%, transparent); }
-.brand-glow { position: absolute; inset: 0; background: conic-gradient(from 0deg, transparent 0 60deg, #89afbf 120deg, transparent 120deg 180deg, var(--color-accent) 240deg, transparent 240deg 300deg, #b99978 360deg); animation: brand-glow-spin 4s linear infinite; }
+.brand-glow { position: absolute; inset: 0; background: conic-gradient(from 0deg, transparent 0 60deg, color-mix(in srgb, var(--color-accent) 55%, transparent) 120deg, transparent 120deg 180deg, var(--color-accent) 240deg, transparent 240deg 300deg, color-mix(in srgb, var(--color-accent) 35%, transparent) 360deg); animation: brand-glow-spin 4s linear infinite; }
 .brand-inner { position: absolute; inset: 1.5px; z-index: 1; border-radius: 6px; background: var(--color-canvas); }
 .brand-reticles { position: absolute; inset: 7px; z-index: 2; display: flex; flex-direction: column; justify-content: space-between; animation: brand-reticle-snap 5s cubic-bezier(.34, 1.56, .64, 1) infinite; }
 .brand-reticle-row { display: flex; justify-content: space-between; }

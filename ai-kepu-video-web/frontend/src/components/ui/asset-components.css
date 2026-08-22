@@ -180,12 +180,7 @@
 .asset-inline-error { display: grid; gap: 2px; padding: 9px 10px; color: var(--color-danger); border-left: 2px solid var(--color-danger); background: var(--color-danger-soft); font-size: var(--text-sm); line-height: 1.45; }
 .asset-inline-error span { color: var(--color-ink-soft); }
 
-.audio-asset-card { display: grid; grid-template-columns: 112px minmax(0, 1fr); }
-.audio-asset-visual { position: relative; isolation: isolate; min-height: 154px; display: grid; place-items: center; overflow: hidden; color: var(--color-accent); border-right: 1px solid var(--color-border-soft); background: var(--color-surface-muted); }
-.audio-asset-glyph { position: absolute; top: var(--space-3); left: var(--space-3); }
-.audio-waveform { height: 48px; display: flex; align-items: center; gap: 3px; }
-.audio-waveform i { width: 3px; height: var(--wave-height); display: block; border-radius: var(--radius-pill); background: currentColor; opacity: .55; transform-origin: center; }
-.audio-asset-card.is-generating .audio-waveform i { animation: audio-wave 1.15s ease-in-out infinite alternate; animation-delay: calc(var(--wave-height) * -12ms); }
+.audio-asset-card { display: grid; grid-template-columns: minmax(0, 1fr); }
 .audio-asset-transcript { display: -webkit-box; margin: 0; overflow: hidden; color: var(--color-ink-soft); font-size: var(--text-md); line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .audio-asset-player { width: 100%; height: 34px; }
 .audio-asset-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); padding-top: var(--space-1); }
@@ -232,15 +227,11 @@
 @keyframes asset-image-reveal { from { filter: blur(8px); opacity: .72; transform: scale(.98); } to { filter: blur(0); opacity: 1; transform: scale(1); } }
 @keyframes asset-scan { to { transform: translateX(100%); } }
 @keyframes asset-status-pulse { 50% { opacity: .45; transform: scale(.88); } }
-@keyframes audio-wave { to { transform: scaleY(.42); opacity: .32; } }
 @keyframes lightbox-backdrop-in { from { opacity: 0; } }
 @keyframes lightbox-in { from { opacity: 0; transform: translateY(10px) scale(.985); } }
 @keyframes asset-error-nudge { 0%, 100% { transform: translateX(0); } 30% { transform: translateX(-3px); } 60% { transform: translateX(3px); } }
 
 @media (max-width: 640px) {
-  .audio-asset-card { grid-template-columns: 76px minmax(0, 1fr); }
-  .audio-asset-visual { min-height: 172px; }
-  .audio-waveform { display: none; }
   .asset-lightbox-backdrop { padding: 0; }
   .asset-lightbox { max-height: 100vh; min-height: 100vh; border: 0; border-radius: 0; }
   .asset-lightbox-footer { grid-template-columns: minmax(0, 1fr); }
@@ -259,7 +250,6 @@
   .asset-card-scan,
   .asset-status.is-info svg,
   .asset-status.is-danger,
-  .audio-asset-card.is-generating .audio-waveform i,
   .asset-lightbox-backdrop,
   .asset-lightbox { animation: none; }
 

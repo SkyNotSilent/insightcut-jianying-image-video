@@ -12,13 +12,13 @@ import './creation-flow.css'
 const exampleScript = `1  大脑如何影响我们的决策？\n\n你是否有过这样的经历：明明知道不应该买，却在情绪低落时下单了很多东西？或者明明想要好好休息，却因为一时愤怒做了后悔的决定？\n\n这并不是你不够理智，而是情绪正在悄悄影响着你的大脑。\n\n2  情绪与大脑的关系\n\n研究表明，情绪会影响我们大脑中负责决策的区域，改变我们对风险和收益的判断。\n\n例如，在压力状态下，我们的大脑更倾向于选择即时缓解的方案，而忽略了长期后果。\n\n3  如何做出更好的决策？\n\n觉察情绪，暂停片刻，理性评估，再从过去的决策中复盘学习。`
 
 const rotatorItems = [
-  '文稿变成视频',
-  '导入剪映草稿',
-  '素材可以逐段修改',
-  '文稿、分镜、素材与剪映草稿都在一个项目里',
-  '一份文稿，一条完整生产链路',
+  { type: 'text', text: '文稿变成视频', visualClass: 'opening-text-bloom', motionClass: 'opening-anim-bloom' },
+  { type: 'text', text: '导入剪映草稿', visualClass: 'opening-text-push', motionClass: 'opening-anim-push' },
+  { type: 'text', text: '素材可以逐段修改', visualClass: 'opening-text-breathe', motionClass: 'opening-anim-breathe' },
+  { type: 'slots' },
+  { type: 'finale' },
 ]
-const rotatorDurations = [3200, 3000, 3500, 5000, 2900]
+const rotatorDurations = [3200, 3000, 3500, 3200, 3400]
 
 function createInitialDraft(draftId) {
   return getDraft(draftId) || (!draftId && getLatestDraft()) || createDraft({ visual_style: '吉卜力', text_style: '知识科普' })
@@ -214,7 +214,7 @@ export function ManuscriptPage() {
     }
   }
 
-  const rotatingCopy = rotatorItems[rotatorIndex]
+  const rotating = rotatorItems[rotatorIndex]
   const draftSummary = useMemo(() => isTheme
     ? { label: '扩写目标', value: `${targetLength} 字`, description: '提交生产后会先扩写成完整文稿，再拆分分镜和计算时长。' }
     : { label: '文稿统计', value: `${estimateDuration(text, draft.voice_speed)}`, description: `预计 ${estimateSegments(text)} 段分镜，当前 ${contentLength} 个正文字符。` }, [contentLength, draft.voice_speed, isTheme, targetLength, text])
@@ -271,7 +271,11 @@ export function ManuscriptPage() {
                   <span><b>02</b><em>审预案</em><small>确认分镜、画面与音色</small></span>
                   <span><b>03</b><em>做成片</em><small>生成素材并按需导出</small></span>
                 </span>
-                <span key={`rotator-${rotatorIndex}`} className="empty-onboarding-note">{rotatingCopy}</span>
+                <span className="opening-rotator-stage">
+                  {rotating.type === 'slots' ? <span key={`slot-${rotatorIndex}`} className="opening-slot-group opening-anim-slot">{['文稿', '分镜', '成片', '剪映'].map((word, index) => <span key={word} className="opening-slot-item"><span className="opening-slot-word" style={{ animationDelay: `${index * 100}ms` }}>{word}</span></span>)}</span> : null}
+                  {rotating.type === 'finale' ? <span key={`finale-${rotatorIndex}`} className="opening-rotator-text opening-text-finale opening-anim-finale">All in one <i>但不</i>是画布</span> : null}
+                  {rotating.type === 'text' ? <span key={`text-${rotatorIndex}`} className={`opening-rotator-text ${rotating.visualClass} ${rotating.motionClass}`}>{rotating.text}</span> : null}
+                </span>
               </EmptyStateCard>
             </button> : null}
             <footer><span>{isTheme ? '主题字数' : '字数'}：{contentLength}</span><span>自动保存到本地草稿</span></footer>

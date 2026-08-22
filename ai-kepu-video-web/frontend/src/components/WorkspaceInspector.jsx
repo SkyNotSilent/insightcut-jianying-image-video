@@ -2,17 +2,21 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  Eye,
+  History,
   LoaderCircle,
   PanelRightClose,
   PanelRightOpen,
   Save,
   Settings2,
+  Upload,
   Volume2,
   WandSparkles,
 } from 'lucide-react'
 import { secondsToLabel, segmentDuration } from '../pages/previewUtils'
 import { VoicePicker } from './VoicePicker'
 import { SegmentFailureList } from './SegmentFailureList'
+import { AssetHistory } from './ui/AssetHistory'
 import { Tooltip } from './ui/Tooltip'
 import { VisualStyleCard } from './ui/VisualStyleCard'
 
@@ -41,6 +45,16 @@ export function WorkspaceInspector({
   busyAction,
   onRegenerate,
   onRegeneratePrompt,
+  imageUrl,
+  imageHistoryOpen,
+  imageHistoryVersions,
+  selectedHistoryId,
+  historyLoading,
+  onOpenImage,
+  onUploadImage,
+  onToggleImageHistory,
+  onSelectHistoryVersion,
+  storageWarning,
   selectedVoice,
   ttsOptions,
   onVoiceChange,
@@ -71,7 +85,22 @@ export function WorkspaceInspector({
         <SegmentFailureList segment={currentSegment} busy={busyAction === `prompt:${currentSegment.segment_index}`} onRetryPrompt={() => onRegeneratePrompt(currentSegment)} />
         <section className="workspace-inspector-section"><div className="workspace-setting-heading"><strong>分镜音色</strong><span>留空时跟随全片音色</span></div><select value={currentSegment.audio_voice_type || ''} disabled={!editable} onChange={event => onSegmentChange(currentSegment.segment_index, { audio_voice_type: event.target.value })}><option value="">跟随全片 · {voices.find(voice => voice.id === workspace.voice_type)?.name || '尚未确认'}</option>{voices.filter(voice => voice.selectable && voice.id !== workspace.voice_type).map(voice => <option key={voice.id} value={voice.id}>{voice.name}</option>)}</select></section>
         <div className="workspace-asset-states"><span className={`is-${currentSegment.image_status}`}>图片 · {assetStatusLabel(currentSegment.image_status)}</span><span className={`is-${currentSegment.audio_status}`}>配音 · {assetStatusLabel(currentSegment.audio_status)}</span></div>
+        <div className="workspace-inspector-media-actions" aria-label="当前分镜素材操作">
+          <button type="button" disabled={!imageUrl} onClick={onOpenImage}><Eye size={14} />查看画面</button>
+          <button type="button" disabled={!editable || Boolean(busyAction)} onClick={onUploadImage}><Upload size={14} />上传替换</button>
+          <button type="button" aria-expanded={imageHistoryOpen} disabled={Boolean(busyAction)} onClick={onToggleImageHistory}><History size={14} />历史版本</button>
+        </div>
         <div className="workspace-inspector-actions"><Tooltip label={currentSegment.image_prompt ? '只处理当前分镜图片，不会重新生成其他素材' : '请先重新生成这一段的提示词'}><button type="button" disabled={!editable || !currentSegment.image_prompt || currentSegment.prompt_status !== 'completed' || busyAction === `image:${currentSegment.segment_index}`} onClick={() => onRegenerate(currentSegment, 'image')}>{operationTarget(currentSegment, 'image') || busyAction === `image:${currentSegment.segment_index}` ? <LoaderCircle className="spin" size={14} /> : <WandSparkles size={14} />}{currentSegment.image_status === 'completed' ? '重新生成图片' : currentSegment.image_status === 'stale' ? '更新此图' : '重试图片'}</button></Tooltip><Tooltip label="只处理当前分镜配音，不会重新生成其他素材"><button type="button" disabled={!editable || busyAction === `audio:${currentSegment.segment_index}`} onClick={() => onRegenerate(currentSegment, 'audio')}>{operationTarget(currentSegment, 'audio') || busyAction === `audio:${currentSegment.segment_index}` ? <LoaderCircle className="spin" size={14} /> : <Volume2 size={14} />}{currentSegment.audio_status === 'completed' ? '重新生成配音' : currentSegment.audio_status === 'stale' ? '更新配音' : '重试配音'}</button></Tooltip></div>
+        {storageWarning ? <p className="workspace-inspector-storage-warning" role="status"><AlertTriangle size={14} /><span>素材仍可使用，但本地归档尚未完成。</span></p> : null}
+        {imageHistoryOpen ? <div className="workspace-inspector-history">
+          <AssetHistory
+            versions={imageHistoryVersions}
+            selectedId={selectedHistoryId}
+            emptyMessage={historyLoading ? '正在读取历史版本…' : '这个分镜还没有可回选的图片版本'}
+            onSelect={busyAction ? undefined : onSelectHistoryVersion}
+            onRestore={busyAction ? undefined : onSelectHistoryVersion}
+          />
+        </div> : null}
       </> : <div className="workspace-inspector-skeleton"><i /><i /><i /><i /><i /></div>}
     </div> : <div ref={settingsScrollRef} id="workspace-settings-panel" className="workspace-settings-panel" role="tabpanel" aria-labelledby="workspace-settings-tab" onScroll={onSettingsScroll}>
       <header><div><span>全片设置</span><h2>画面与配音</h2></div><button type="button" aria-label="收起设置" onClick={onClose}><PanelRightClose size={18} /></button></header>

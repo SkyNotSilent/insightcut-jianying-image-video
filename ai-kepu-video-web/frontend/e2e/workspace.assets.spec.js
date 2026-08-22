@@ -99,13 +99,16 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test('keeps the three-column workspace stable and exposes image history plus lightbox', async ({ page }) => {
+test('keeps the center preview focused and exposes image history plus lightbox from the inspector', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/workspace/ui-assets')
 
   await expect(page.getByRole('region', { name: '分镜导航' })).toBeVisible()
-  await expect(page.getByRole('region', { name: '分镜 1 素材' })).toBeVisible()
-  await expect(page.getByText('画面与配音')).toBeVisible()
+  await expect(page.locator('.workspace-current-assets')).toHaveCount(0)
+  await expect(page.getByText('当前分镜素材')).toHaveCount(0)
+  const inspector = page.getByRole('complementary', { name: '生产设置' })
+  await expect(inspector.getByRole('button', { name: '上传替换' })).toBeVisible()
+  await expect(inspector.getByRole('button', { name: '历史版本' })).toBeVisible()
 
   const overflow = await page.evaluate(() => ({
     document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -114,13 +117,13 @@ test('keeps the three-column workspace stable and exposes image history plus lig
   expect(overflow.document).toBe(0)
   expect(overflow.workspace).toBe(0)
 
-  await page.getByRole('button', { name: '历史版本' }).click()
-  await expect(page.getByRole('region', { name: '素材版本' })).toBeVisible()
-  await expect(page.getByText('2 个版本')).toBeVisible()
+  await inspector.getByRole('button', { name: '历史版本' }).click()
+  await expect(inspector.getByRole('region', { name: '素材版本' })).toBeVisible()
+  await expect(inspector.getByText('2 个版本')).toBeVisible()
   await page.getByRole('button', { name: /^重生成版本/ }).click()
   await expect(page.getByText('已切换为这个图片版本')).toBeVisible()
 
-  await page.getByRole('button', { name: '查看画面素材' }).click()
+  await inspector.getByRole('button', { name: '查看画面' }).click()
   await expect(page.getByRole('dialog', { name: '分镜 1' })).toBeVisible()
   await expect(page.getByRole('dialog', { name: '分镜 1' }).getByText('暖色纸张上的岛屿与灯塔')).toBeVisible()
   await page.keyboard.press('ArrowRight')
