@@ -48,6 +48,7 @@ class VoiceOverGenerator:
         output_dir: str = "output/voiceovers",
         tts_config: dict = None,
         clone_store=None,
+        generation_config: dict = None,
     ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -62,7 +63,7 @@ class VoiceOverGenerator:
         self.default_voice = self.tts_config.get("default_voice") or Config.DOUBAO_TTS_DEFAULT_VOICE
         self.mimo_config = self.tts_config.get("mimo") or {}
         self.clone_store = clone_store
-        generation_config = Config.generation_config()
+        generation_config = generation_config or Config.generation_config()
         retry_count = generation_config.get("retry_count", 2)
         self.max_attempts = max(1, min(6, int(retry_count) + 1))
         self.retry_interval_seconds = max(

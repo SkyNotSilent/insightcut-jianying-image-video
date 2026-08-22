@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from src.api.error_model import ErrorCode, classify_exception, sanitize_text
+from src.api.error_model import ErrorCode, classify_exception, make_safe_error, sanitize_text
 from src.api import routes
 from src.database import sqlite_client as sqlite_client_module
 from src.database.sqlite_client import SQLiteClient
@@ -77,6 +77,20 @@ def test_rate_limit_extracts_retry_after_and_safe_request_metadata():
             "request_id": "req_abc-123",
         },
     }
+
+
+def test_content_policy_error_is_actionable_and_not_retryable():
+    safe = make_safe_error(
+        ErrorCode.CONTENT_POLICY,
+        provider="agnes",
+        http_status=400,
+        request_id="req-policy-safe",
+    )
+
+    assert safe.code is ErrorCode.CONTENT_POLICY
+    assert safe.retryable is False
+    assert "提示词" in safe.safe_message
+    assert safe.metadata()["request_id"] == "req-policy-safe"
 
 
 def test_export_job_transmits_structured_error_without_request_payload(

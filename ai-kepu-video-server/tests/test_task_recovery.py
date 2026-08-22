@@ -2408,7 +2408,7 @@ def test_explicit_none_clears_only_segment_error_columns(temp_db):
     assert row["audio_error"] is None
 
 
-def test_successful_retry_clears_segment_and_task_asset_errors(
+def test_successful_retry_clears_segment_errors_and_preserves_failed_asset_history(
     executor_db, tmp_path, monkeypatch
 ):
     create_task(executor_db, status="interrupted")
@@ -2459,10 +2459,14 @@ def test_successful_retry_clears_segment_and_task_asset_errors(
     assert row["audio_status"] == "completed"
     assert row["image_error"] is None
     assert row["audio_error"] is None
-    assert len(assets) == 2
-    assert all(asset["status"] == "completed" for asset in assets)
-    assert all(asset["error_message"] is None for asset in assets)
-    assert all(asset["path"] for asset in assets)
+    assert len(assets) == 4
+    completed_assets = [asset for asset in assets if asset["status"] == "completed"]
+    failed_assets = [asset for asset in assets if asset["status"] == "failed"]
+    assert len(completed_assets) == 2
+    assert len(failed_assets) == 2
+    assert all(asset["error_message"] is None for asset in completed_assets)
+    assert all(asset["path"] for asset in completed_assets)
+    assert {asset["error_message"] for asset in failed_assets} == {"旧图片错误", "旧音频错误"}
 
 
 def test_asset_segment_row_false_interrupts_before_draft(
@@ -2588,7 +2592,7 @@ def test_default_task_completes_without_instantiating_ffmpeg(
     assert list(tmp_path.rglob("*.mp4")) == []
 
 
-def test_reused_valid_assets_clear_stale_segment_and_asset_errors(
+def test_reused_valid_assets_clear_segment_errors_without_rewriting_asset_history(
     executor_db, tmp_path, monkeypatch
 ):
     create_task(executor_db, status="interrupted")
@@ -2646,7 +2650,7 @@ def test_reused_valid_assets_clear_stale_segment_and_asset_errors(
     assert row["audio_error"] is None
     assert len(assets) == 2
     assert all(asset["status"] == "completed" for asset in assets)
-    assert all(asset["error_message"] is None for asset in assets)
+    assert {asset["error_message"] for asset in assets} == {"旧图片错误", "旧音频错误"}
     assert sorted(upsert_calls) == ["audio", "image"]
 
 

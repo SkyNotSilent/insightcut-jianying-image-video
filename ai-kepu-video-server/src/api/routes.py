@@ -189,6 +189,31 @@ def _parse_options_json(value) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _normalize_subtitle_options(value: Optional[dict]) -> dict:
+    value = value or {}
+    return {
+        "size": value.get("size") if value.get("size") in {"small", "standard", "large"} else "standard",
+        "position": value.get("position") if value.get("position") in {"low", "standard", "high"} else "standard",
+        "outline": value.get("outline") if value.get("outline") in {"light", "standard", "strong"} else "standard",
+    }
+
+
+def _normalize_generation_options(value: Optional[dict]) -> dict:
+    value = value or {}
+    return {
+        "prompt_concurrency": max(1, min(8, int(value.get("prompt_concurrency") or 4))),
+        "image_concurrency": max(1, min(8, int(value.get("image_concurrency") or 8))),
+        "retry_count": max(0, min(5, int(value.get("retry_count") if value.get("retry_count") is not None else 2))),
+        "retry_interval_seconds": max(1, min(60, int(value.get("retry_interval_seconds") or 5))),
+    }
+
+
+def _task_subtitle_options(task_row: Optional[dict]) -> dict:
+    return _normalize_subtitle_options(
+        _parse_options_json((task_row or {}).get("subtitle_options_json"))
+    )
+
+
 def _safe_draft_name(name: str, task_id: str) -> str:
     """生成可用的本地草稿目录名。"""
     base = (name or "本地上传图片").strip() or "本地上传图片"
@@ -381,8 +406,9 @@ def _media_fingerprint(task, segments: List[dict]) -> str:
         "style": task_row.get("style") or getattr(task, "style", "") or "",
         "voice_type": task_row.get("voice_type") or getattr(task, "voice_type", "") or "",
         "tts_options_json": task_row.get("tts_options_json") or "",
+        "subtitle_options_json": task_row.get("subtitle_options_json") or "",
         "canvas": _task_canvas(task),
-        "render_config": FFmpegExporter.get_render_config(canvas=_task_canvas(task)),
+        "render_config": _render_config_for_task(FFmpegExporter, task, task_row),
         "settings": _file_signature(str(Config.BASE_DIR / "config" / "settings.json")),
         "animation_seed": _task_animation_seed(task.task_id),
         "segments": [
@@ -397,6 +423,8 @@ def _media_fingerprint(task, segments: List[dict]) -> str:
                 "audio": _file_signature(seg.get("audio_path")),
                 "audio_voice_type": seg.get("audio_voice_type"),
                 "audio_tts_options_json": seg.get("audio_tts_options_json"),
+                "selected_image_asset_id": seg.get("selected_image_asset_id"),
+                "selected_audio_asset_id": seg.get("selected_audio_asset_id"),
                 "duration": seg.get("duration"),
             }
             for seg in segments
@@ -404,6 +432,17 @@ def _media_fingerprint(task, segments: List[dict]) -> str:
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _render_config_for_task(exporter_class, task, task_row: dict) -> dict:
+    """Read the task render snapshot while keeping simple test exporters compatible."""
+    try:
+        return exporter_class.get_render_config(
+            canvas=_task_canvas(task),
+            subtitle_options=_task_subtitle_options(task_row),
+        )
+    except TypeError:
+        return exporter_class.get_render_config(canvas=_task_canvas(task))
 
 
 def _plan_fingerprint(task_row: dict, segments: List[dict]) -> str:
@@ -415,12 +454,17 @@ def _plan_fingerprint(task_row: dict, segments: List[dict]) -> str:
         "ratio": normalize_ratio(task_row.get("ratio") or "16:9"),
         "voice_type": task_row.get("voice_type") or "",
         "tts_options_json": task_row.get("tts_options_json") or "",
+        "subtitle_options_json": task_row.get("subtitle_options_json") or "",
+        "generation_options_json": task_row.get("generation_options_json") or "",
+        "template_id": task_row.get("template_id") or "",
         "segments": [
             {
                 "segment_index": segment.get("segment_index"),
                 "text": segment.get("text") or "",
                 "image_prompt": segment.get("image_prompt") or "",
                 "audio_voice_type": segment.get("audio_voice_type") or "",
+                "selected_image_asset_id": segment.get("selected_image_asset_id") or "",
+                "selected_audio_asset_id": segment.get("selected_audio_asset_id") or "",
             }
             for segment in segments
         ],
@@ -947,7 +991,15 @@ def _record_asset(
     text: Optional[str] = None,
     voice_type: Optional[str] = None,
     metadata: Optional[dict] = None,
+    operation_id: Optional[str] = None,
+    origin_asset_id: Optional[str] = None,
 ) -> dict:
+    snapshot = {
+        "prompt": prompt,
+        "text": text,
+        "voice_type": voice_type,
+        "metadata": metadata or {},
+    }
     return mysql_client.save_task_asset(
         task_id=task_id,
         asset_type=asset_type,
@@ -960,6 +1012,9 @@ def _record_asset(
         text=text,
         voice_type=voice_type,
         metadata_json=json.dumps(metadata or {}, ensure_ascii=False),
+        operation_id=operation_id,
+        origin_asset_id=origin_asset_id,
+        snapshot_json=json.dumps(snapshot, ensure_ascii=False),
     )
 
 
@@ -996,9 +1051,11 @@ def _write_task_srt(task, segments: List[dict]) -> Path:
 
 def _ensure_task_assets(task, segments: List[dict]):
     """兼容旧任务：从段落表和草稿目录尽量补齐资产记录。"""
-    if not task.result or not task.result.draft_path:
-        return
-    draft_path = Path(task.result.draft_path)
+    draft_path = (
+        Path(task.result.draft_path)
+        if task.result and task.result.draft_path
+        else None
+    )
     current_paths = set()
 
     for seg in segments:
@@ -1031,6 +1088,8 @@ def _ensure_task_assets(task, segments: List[dict]):
             )
 
     for dirname, asset_type in (("images", "image"), ("voiceovers", "audio")):
+        if draft_path is None:
+            continue
         folder = draft_path / dirname
         if not folder.exists():
             continue
@@ -1058,16 +1117,20 @@ def _ensure_task_assets(task, segments: List[dict]):
                 voice_type=getattr(task, "voice_type", None) if asset_type == "audio" else None,
             )
 
-    if segments:
-        srt_path = _write_task_srt(task, segments)
-        _record_asset(
-            task.task_id,
-            "subtitle",
-            "subtitle",
-            path=str(srt_path),
-            label="项目字幕 SRT",
-            text="\n".join(normalize_subtitle_text(seg.get("text") or "") for seg in segments),
-        )
+    if segments and task.result and task.result.draft_path:
+        # Workspace reads must not create files.  Record an SRT only after an
+        # explicit subtitle/export action has already materialized it.
+        srt_path = _subtitle_srt_path(task)
+        if srt_path.exists():
+            _record_asset(
+                task.task_id,
+                "subtitle",
+                "subtitle",
+                path=str(srt_path),
+                label="项目字幕 SRT",
+                text="\n".join(normalize_subtitle_text(seg.get("text") or "") for seg in segments),
+            )
+    mysql_client.backfill_selected_asset_ids(task.task_id)
 
 
 def _asset_to_response(asset: dict, request: Request) -> dict:
@@ -1090,6 +1153,9 @@ def _asset_to_response(asset: dict, request: Request) -> dict:
         "prompt": asset.get("prompt"),
         "text": asset.get("text"),
         "voice_type": asset.get("voice_type"),
+        "operation_id": asset.get("operation_id"),
+        "origin_asset_id": asset.get("origin_asset_id"),
+        "snapshot": _parse_options_json(asset.get("snapshot_json")),
         "created_at": asset.get("created_at"),
     }
 
@@ -1313,7 +1379,10 @@ def _export_mp4(
             f".{output_path.stem}.{uuid.uuid4().hex}.render.mp4"
         )
         try:
-            FFmpegExporter(canvas=_task_canvas(task)).export(
+            FFmpegExporter(
+                canvas=_task_canvas(task),
+                subtitle_options=_task_subtitle_options(mysql_client.get_task(task.task_id)),
+            ).export(
                 segments=segment_texts,
                 media_paths=[str(path) for path in resolved_images],
                 voiceover_files=[str(path) if path else None for path in resolved_audio],
@@ -1976,6 +2045,143 @@ async def extract_document_text(file: UploadFile = File(...)):
     }
 
 
+def _activity_step(row: dict) -> int:
+    status = row.get("status")
+    phase = str(row.get("workflow_phase") or "")
+    current_step = str(row.get("current_step") or "")
+    if status == TaskStatus.COMPLETED.value or phase == "ready":
+        return 6
+    if status == TaskStatus.AWAITING_FINALIZATION.value or phase in {"awaiting_finalization", "finalizing"}:
+        return 6
+    if phase in {"generating_assets", "repairing_assets", "assets_requested"} or current_step in {"image_generation", "voiceover_generation"}:
+        return 5
+    if status == TaskStatus.AWAITING_CONFIRMATION.value:
+        return 3 if not row.get("voice_confirmed") else 4
+    if current_step in {"image_prompt_generation", "segmentation"} or phase == "planning":
+        return 2
+    return 1
+
+
+def _activity_item(row: dict) -> dict:
+    total = int(row.get("segments_total") or 0)
+    images = int(row.get("images_ready") or 0)
+    audio = int(row.get("audio_ready") or 0)
+    asset_total = total * 2
+    completed = images + audio
+    if asset_total:
+        progress = round(completed / asset_total * 100)
+    elif row.get("status") == TaskStatus.COMPLETED.value:
+        progress = 100
+    elif row.get("status") == TaskStatus.PENDING.value:
+        progress = 4
+    else:
+        progress = 12 if _activity_step(row) <= 2 else 50
+    operation_total = 0
+    try:
+        operation_total = len(json.loads(row.get("targets_json") or "[]"))
+    except (TypeError, ValueError):
+        operation_total = 0
+    step = _activity_step(row)
+    route = f"/export/{row['task_id']}" if step == 6 and row.get("status") == TaskStatus.COMPLETED.value else f"/workspace/{row['task_id']}"
+    return {
+        "task_id": row.get("task_id"),
+        "name": row.get("name") or row.get("theme") or "未命名项目",
+        "status": row.get("status"),
+        "stage": row.get("workflow_phase") or row.get("current_step") or row.get("status"),
+        "step": step,
+        "progress": max(0, min(100, progress)),
+        "segments_total": total,
+        "images_ready": images,
+        "audio_ready": audio,
+        "operation": {
+            "operation_id": row.get("operation_id"),
+            "kind": row.get("operation_kind"),
+            "state": row.get("operation_state"),
+            "total": operation_total,
+            "completed": int(row.get("completed_count") or 0),
+            "failed": int(row.get("failed_count") or 0),
+        } if row.get("operation_id") else None,
+        "can_cancel": bool(row.get("status") in {TaskStatus.PENDING.value, TaskStatus.PROCESSING.value}),
+        "target_route": route,
+        "updated_at": row.get("updated_at"),
+    }
+
+
+@router.get("/activity/tasks")
+async def get_task_activity(limit: int = Query(20, ge=1, le=50)):
+    """Single aggregate used by the global task capsule; never fans out per task."""
+    rows = mysql_client.list_task_activity(limit=limit)
+    running, attention, recent = [], [], []
+    attention_statuses = {
+        TaskStatus.AWAITING_CONFIRMATION.value,
+        TaskStatus.AWAITING_FINALIZATION.value,
+        TaskStatus.INTERRUPTED.value,
+        TaskStatus.FAILED.value,
+    }
+    for row in rows:
+        item = _activity_item(row)
+        if row.get("status") in attention_statuses:
+            attention.append(item)
+        elif row.get("status") in {TaskStatus.PENDING.value, TaskStatus.PROCESSING.value} or row.get("operation_id"):
+            running.append(item)
+        else:
+            recent.append(item)
+    return {
+        "running": running,
+        "attention": attention,
+        "recent": recent,
+        "counts": {"running": len(running), "attention": len(attention)},
+        "polled_at": datetime.now().isoformat(),
+    }
+
+
+@router.get("/templates")
+async def list_production_templates():
+    return {"items": mysql_client.list_production_templates()}
+
+
+@router.post("/templates", status_code=201)
+async def create_production_template(payload: dict = Body(...)):
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="模板名称不能为空")
+    values = dict(payload)
+    values["name"] = name[:80]
+    values["ratio"] = normalize_ratio(values.get("ratio") or "16:9")
+    values["subtitle_options"] = _normalize_subtitle_options(values.get("subtitle_options"))
+    values["generation_options"] = _normalize_generation_options(values.get("generation_options"))
+    created = mysql_client.create_production_template(values)
+    if not created:
+        raise HTTPException(status_code=500, detail="创建模板失败")
+    return created
+
+
+@router.patch("/templates/{template_id}")
+async def update_production_template(template_id: str, payload: dict = Body(...)):
+    values = dict(payload)
+    if "name" in values and not str(values.get("name") or "").strip():
+        raise HTTPException(status_code=400, detail="模板名称不能为空")
+    if "name" in values:
+        values["name"] = str(values["name"]).strip()[:80]
+    if "ratio" in values:
+        values["ratio"] = normalize_ratio(values["ratio"])
+    if "subtitle_options" in values:
+        values["subtitle_options"] = _normalize_subtitle_options(values["subtitle_options"])
+    if "generation_options" in values:
+        values["generation_options"] = _normalize_generation_options(values["generation_options"])
+    updated = mysql_client.update_production_template(template_id, values)
+    if not updated:
+        raise HTTPException(status_code=404, detail="模板不存在")
+    return updated
+
+
+@router.delete("/templates/{template_id}", status_code=204)
+async def delete_production_template(template_id: str):
+    if not mysql_client.delete_production_template(template_id):
+        raise HTTPException(status_code=404, detail="模板不存在")
+    return Response(status_code=204)
+
+
 @router.post("/tasks", response_model=CreateTaskResponse)
 async def create_task(request: CreateTaskRequest):
     """
@@ -2008,6 +2214,14 @@ async def create_task(request: CreateTaskRequest):
         tts_options=tts_options,
         execution_mode=request.execution_mode,
         script_policy=request.script_policy,
+        source_draft_id=request.source_draft_id,
+        template_id=request.template_id,
+        generation_options=_normalize_generation_options(
+            _model_dict(request.generation_options, exclude_none=True)
+        ),
+        subtitle_options=_normalize_subtitle_options(
+            _model_dict(request.subtitle_options, exclude_none=True)
+        ),
     )
 
     # 启动异步执行
@@ -2253,14 +2467,8 @@ def _workspace_draft_ready(task_row: dict) -> bool:
 
 
 def _workspace_output_dir(task, segments: List[dict]) -> Path:
-    result = getattr(task, "result", None)
-    if result and result.draft_path:
-        resolved_draft = _workspace_resolve_directory(result.draft_path)
-        if resolved_draft:
-            return resolved_draft
-        candidates = _workspace_storage_candidates(result.draft_path)
-        if candidates:
-            return candidates[0]
+    # Prefer the live project media root. A completed task's result points into
+    # an immutable finalize version and must not become the upload workspace.
     for segment in segments:
         for field in ("image_path", "audio_path"):
             raw_path = segment.get(field)
@@ -2269,6 +2477,14 @@ def _workspace_output_dir(task, segments: List[dict]) -> Path:
             path = _workspace_resolve_file(raw_path)
             if path and path.parent.name in {"images", "voiceovers", "audio"}:
                 return path.parent.parent
+    result = getattr(task, "result", None)
+    if result and result.draft_path:
+        resolved_draft = _workspace_resolve_directory(result.draft_path)
+        if resolved_draft:
+            return resolved_draft
+        candidates = _workspace_storage_candidates(result.draft_path)
+        if candidates:
+            return candidates[0]
     name = getattr(task, "name", None) or getattr(task, "theme", None) or task.task_id
     return Config.BASE_DIR / "output" / task.task_id / _safe_draft_name(name, task.task_id)
 
@@ -2276,6 +2492,17 @@ def _workspace_output_dir(task, segments: List[dict]) -> Path:
 def _ensure_workspace_mutable(task_row: dict) -> None:
     if task_row.get("status") == TaskStatus.PROCESSING.value:
         raise HTTPException(status_code=409, detail="任务正在生成，请等待当前阶段完成后再修改")
+
+
+def _invalidate_review_first_draft(task_id: str, task_row: dict) -> None:
+    """Require a fresh draft after selecting or uploading different media."""
+    if task_row.get("execution_mode") != "review_first":
+        return
+    if not mysql_client.invalidate_task_result_for_finalization(task_id):
+        raise HTTPException(status_code=500, detail="素材已保存，但生产草稿状态更新失败")
+    invalidate = getattr(task_manager, "invalidate_task_cache", None)
+    if callable(invalidate):
+        invalidate(task_id)
 
 
 def _workspace_health(task_row: dict, segments: List[dict]) -> dict:
@@ -2470,7 +2697,9 @@ def _reconcile_workspace_state(task_row: dict, segments: List[dict]) -> dict:
         status=next_status,
         current_step=next_step,
     )
-    task_manager.invalidate_task_cache(task_id)
+    invalidate = getattr(task_manager, "invalidate_task_cache", None)
+    if callable(invalidate):
+        invalidate(task_id)
     return mysql_client.get_task(task_id) or task_row
 
 
@@ -2663,6 +2892,9 @@ def _workspace_segment_payload(segment: dict, request: Request) -> dict:
         "audio_storage_warning": audio_storage_warning,
         "audio_voice_type": segment.get("audio_voice_type"),
         "audio_tts_options_json": segment.get("audio_tts_options_json"),
+        "selected_image_asset_id": segment.get("selected_image_asset_id"),
+        "selected_audio_asset_id": segment.get("selected_audio_asset_id"),
+        "audio_mismatch_confirmed": bool(segment.get("audio_mismatch_confirmed")),
         "duration": segment.get("duration"),
         "created_at": segment.get("created_at"),
         "updated_at": segment.get("updated_at"),
@@ -2694,6 +2926,10 @@ async def get_task_workspace(task_id: str, request: Request):
     task_manager.fail_stale_task_data(task_row)
     task_row = mysql_client.get_task(task_id) or task_row
     segments = mysql_client.get_segments(task_id)
+    task_object = task_manager.get_task(task_id)
+    if task_object:
+        _ensure_task_assets(task_object, segments)
+        segments = mysql_client.get_segments(task_id)
     task_row = _reconcile_workspace_state(task_row, segments)
     health = _workspace_health(task_row, segments)
     recovery_targets = _workspace_recovery_targets(segments)
@@ -2703,6 +2939,12 @@ async def get_task_workspace(task_id: str, request: Request):
         parsed_options = json.loads(task_row.get("tts_options_json") or "{}")
     except (TypeError, ValueError):
         parsed_options = {}
+    subtitle_options = _normalize_subtitle_options(
+        _parse_options_json(task_row.get("subtitle_options_json"))
+    )
+    generation_options = _normalize_generation_options(
+        _parse_options_json(task_row.get("generation_options_json"))
+    )
 
     real_duration = sum(
         float(segment.get("duration") or 0)
@@ -2765,6 +3007,10 @@ async def get_task_workspace(task_id: str, request: Request):
         "ratio": normalize_ratio(task_row.get("ratio") or "16:9"),
         "voice_type": task_row.get("voice_type") or "",
         "tts_options": parsed_options,
+        "subtitle_options": subtitle_options,
+        "generation_options": generation_options,
+        "template_id": task_row.get("template_id"),
+        "source_draft_id": task_row.get("source_draft_id"),
         "voice_confirmed": bool(
             task_row.get("voice_confirmed") and task_row.get("voice_type")
         ),
@@ -2854,12 +3100,32 @@ async def update_task_workspace_settings(task_id: str, payload: dict = Body(...)
         tts_options_json = json.dumps(
             _snapshot_tts_options(voice_type, tts_options), ensure_ascii=False
         )
+    old_subtitle_options = _normalize_subtitle_options(
+        _parse_options_json(task_row.get("subtitle_options_json"))
+    )
+    old_generation_options = _normalize_generation_options(
+        _parse_options_json(task_row.get("generation_options_json"))
+    )
+    subtitle_options = _normalize_subtitle_options(
+        payload.get("subtitle_options") or old_subtitle_options
+    )
+    generation_options = _normalize_generation_options(
+        payload.get("generation_options") or old_generation_options
+    )
+    voice_confirmed = (
+        bool(payload.get("voice_confirmed"))
+        if "voice_confirmed" in payload
+        else bool(task_row.get("voice_confirmed"))
+    )
     updates = {
         "style": style,
         "ratio": ratio,
         "voice_type": voice_type,
         "tts_options_json": tts_options_json,
-        "voice_confirmed": 1 if payload.get("voice_confirmed") and voice_type else 0,
+        "voice_confirmed": 1 if voice_confirmed and voice_type else 0,
+        "template_id": payload.get("template_id", task_row.get("template_id")),
+        "subtitle_options_json": json.dumps(subtitle_options, ensure_ascii=False),
+        "generation_options_json": json.dumps(generation_options, ensure_ascii=False),
     }
     next_version = mysql_client.update_task_plan_fields(
         task_id, updates, expected_plan_version=expected_version
@@ -2871,6 +3137,7 @@ async def update_task_workspace_settings(task_id: str, payload: dict = Body(...)
 
     style_changed = style != old_style or ratio != old_ratio
     voice_changed = voice_type != old_voice or tts_options_json != task_row.get("tts_options_json")
+    subtitle_changed = subtitle_options != old_subtitle_options
     segments = mysql_client.get_segments(task_id)
     for segment in segments:
         segment_updates = {}
@@ -2910,6 +3177,9 @@ async def update_task_workspace_settings(task_id: str, payload: dict = Body(...)
         "plan_version": next_version,
         "snapshot_key": _plan_fingerprint(refreshed, refreshed_segments),
         "stage": _workspace_stage(refreshed),
+        "subtitle_changed": subtitle_changed,
+        "generation_options": generation_options,
+        "subtitle_options": subtitle_options,
     }
 
 
@@ -3588,7 +3858,10 @@ async def get_task_render_config(task_id: str):
     segments = mysql_client.get_segments(task_id)
     from src.export.ffmpeg_exporter import FFmpegExporter, build_animation_params
 
-    config = FFmpegExporter.get_render_config(canvas=_task_canvas(task))
+    config = FFmpegExporter.get_render_config(
+        canvas=_task_canvas(task),
+        subtitle_options=_task_subtitle_options(mysql_client.get_task(task_id)),
+    )
     config["ratio"] = _task_ratio(task)
     config["animation_seed"] = _task_animation_seed(task_id)
     config["animations"] = build_animation_params(len(segments), config["animation_seed"])
@@ -3644,7 +3917,10 @@ async def render_task_preview(
     preview_dir.mkdir(parents=True, exist_ok=True)
     video_path = preview_dir / filename
 
-    exporter = FFmpegExporter(canvas=_task_canvas(task))
+    exporter = FFmpegExporter(
+        canvas=_task_canvas(task),
+        subtitle_options=_task_subtitle_options(mysql_client.get_task(task_id)),
+    )
     exporter.export(
         segments=segment_texts,
         media_paths=media_paths,
@@ -3889,6 +4165,172 @@ async def list_task_assets(
     return [_asset_to_response(asset, request) for asset in assets]
 
 
+@router.get("/tasks/{task_id}/asset-library")
+async def get_task_asset_library(
+    task_id: str,
+    request: Request,
+    asset_type: Optional[str] = Query(None, description="image/audio/subtitle"),
+    scope: str = Query("project", description="project/segment"),
+    segment_index: Optional[int] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(24, ge=1, le=100),
+):
+    task = task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if asset_type and asset_type not in {"image", "audio", "subtitle"}:
+        raise HTTPException(status_code=400, detail="asset_type 必须是 image/audio/subtitle")
+    if scope not in {"project", "segment"}:
+        raise HTTPException(status_code=400, detail="scope 必须是 project/segment")
+    if scope == "segment" and segment_index is None:
+        raise HTTPException(status_code=400, detail="分镜范围必须提供 segment_index")
+    segments = mysql_client.get_segments(task_id)
+    _ensure_task_assets(task, segments)
+    segments = mysql_client.get_segments(task_id)
+    selected = {
+        ("image", segment.get("selected_image_asset_id")): segment.get("segment_index")
+        for segment in segments if segment.get("selected_image_asset_id")
+    }
+    selected.update({
+        ("audio", segment.get("selected_audio_asset_id")): segment.get("segment_index")
+        for segment in segments if segment.get("selected_audio_asset_id")
+    })
+    assets = mysql_client.list_task_assets(
+        task_id,
+        asset_type=asset_type,
+        segment_index=segment_index if scope == "segment" else None,
+    )
+    total = len(assets)
+    start = (page - 1) * page_size
+    items = []
+    for asset in assets[start:start + page_size]:
+        item = _asset_to_response(asset, request)
+        item["is_selected"] = (asset.get("asset_type"), asset.get("asset_id")) in selected
+        item["selected_by_segment"] = selected.get((asset.get("asset_type"), asset.get("asset_id")))
+        items.append(item)
+    return {"items": items, "page": page, "page_size": page_size, "total": total}
+
+
+@router.post("/tasks/{task_id}/segments/{segment_index}/select-asset")
+async def select_segment_asset(
+    task_id: str,
+    segment_index: int,
+    request: Request,
+    payload: dict = Body(...),
+):
+    task = task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    task_row = mysql_client.get_task(task_id) or {}
+    _ensure_workspace_mutable(task_row)
+    if mysql_client.get_active_task_operation(task_id) or task_runtime.is_running(task_id):
+        raise HTTPException(status_code=409, detail="当前已有项目操作正在执行")
+    segments = mysql_client.get_segments(task_id)
+    segment = next(
+        (item for item in segments if int(item.get("segment_index") or 0) == int(segment_index)),
+        None,
+    )
+    if not segment:
+        raise HTTPException(status_code=404, detail="段落不存在")
+    snapshot_key = str(payload.get("snapshot_key") or "")
+    if snapshot_key and snapshot_key != _plan_fingerprint(task_row, segments):
+        raise HTTPException(status_code=409, detail={"code": "stale_snapshot", "message": "预案已更新，请刷新素材列表"})
+    _ensure_task_assets(task, segments)
+    asset_id = str(payload.get("asset_id") or "")
+    asset_type = str(payload.get("asset_type") or "")
+    if asset_type not in {"image", "audio"}:
+        raise HTTPException(status_code=400, detail="asset_type 必须是 image/audio")
+    asset = mysql_client.get_task_asset(task_id, asset_id)
+    if not asset or asset.get("asset_type") != asset_type:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    if _workspace_resolve_file(asset.get("path")) is None:
+        raise HTTPException(status_code=404, detail="素材文件不存在")
+    confirm_mismatch = bool(payload.get("confirm_text_mismatch"))
+    mismatch = False
+    if asset_type == "audio":
+        source_text = normalize_subtitle_text(asset.get("text") or "").strip()
+        target_text = normalize_subtitle_text(segment.get("text") or "").strip()
+        mismatch = bool(source_text and target_text and source_text != target_text)
+        if mismatch and not confirm_mismatch:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "audio_text_mismatch",
+                    "message": "这段配音的原文与当前分镜不一致，确认后才能复用",
+                    "source_text": asset.get("text") or "",
+                    "target_text": segment.get("text") or "",
+                },
+            )
+    selected_asset = asset
+    source_segment_index = asset.get("segment_index")
+    if source_segment_index is None or int(source_segment_index) != int(segment_index):
+        selected_asset = _record_asset(
+            task_id,
+            asset_type,
+            "selected",
+            path=asset.get("path"),
+            url=asset.get("url"),
+            segment_index=segment_index,
+            prompt=asset.get("prompt"),
+            text=asset.get("text"),
+            voice_type=asset.get("voice_type"),
+            metadata={
+                "source_segment_index": source_segment_index,
+                "source_asset_id": asset.get("asset_id"),
+            },
+            origin_asset_id=asset.get("asset_id"),
+        )
+        if not selected_asset:
+            raise HTTPException(status_code=500, detail="素材复用版本保存失败")
+    success = mysql_client.select_segment_asset(
+        task_id,
+        segment_index,
+        selected_asset,
+        asset_type,
+        confirm_text_mismatch=mismatch and confirm_mismatch,
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail="切换素材失败")
+    _invalidate_review_first_draft(task_id, task_row)
+    invalidate = getattr(task_manager, "invalidate_task_cache", None)
+    if callable(invalidate):
+        invalidate(task_id)
+    refreshed = mysql_client.get_segments(task_id)
+    try:
+        file_url = _normalize_local_media_url(selected_asset.get("url"), request)
+    except RuntimeError:
+        file_url = selected_asset.get("url")
+    selected_asset_id = selected_asset.get("asset_id")
+    if not file_url:
+        try:
+            file_url = str(request.url_for(
+                "download_task_asset_file", task_id=task_id, asset_id=selected_asset_id
+            ))
+        except RuntimeError:
+            file_url = f"/tasks/{task_id}/assets/{selected_asset_id}/file"
+    response = {
+        "message": "素材已切换",
+        "asset_id": selected_asset_id,
+        "origin_asset_id": selected_asset.get("origin_asset_id"),
+        "asset_type": asset_type,
+        "segment_index": segment_index,
+        "url": file_url,
+        "audio_text_mismatch": mismatch,
+        "snapshot_key": _plan_fingerprint(task_row, refreshed),
+    }
+    if asset_type == "image":
+        response.update({
+            "previous_image_path": segment.get("image_path"),
+            "image_path": selected_asset.get("path"),
+        })
+    else:
+        response.update({
+            "previous_audio_path": segment.get("audio_path"),
+            "audio_path": selected_asset.get("path"),
+        })
+    return response
+
+
 @router.get("/tasks/{task_id}/subtitle.srt")
 async def download_task_subtitle(task_id: str):
     task = task_manager.get_task(task_id)
@@ -3995,64 +4437,14 @@ async def download_task_asset_file(task_id: str, asset_id: str):
 
 @router.post("/tasks/{task_id}/segments/{segment_index}/select-image")
 async def select_segment_image(task_id: str, segment_index: int, request: Request, payload: dict = Body(...)):
-    task = task_manager.get_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    task_row = mysql_client.get_task(task_id) or {}
-    _ensure_workspace_mutable(task_row)
-    if mysql_client.get_active_task_operation(task_id) or task_runtime.is_running(task_id):
-        raise HTTPException(status_code=409, detail="当前已有项目操作正在执行")
-    segments = mysql_client.get_segments(task_id)
-    previous = next(
-        (item for item in segments if int(item.get("segment_index") or 0) == int(segment_index)),
-        None,
-    )
-    if not previous:
-        raise HTTPException(status_code=404, detail="段落不存在")
-    _ensure_task_assets(task, segments)
-    asset_id = (payload or {}).get("asset_id")
-    asset = mysql_client.get_task_asset(task_id, asset_id)
-    if not asset or asset.get("asset_type") != "image":
-        raise HTTPException(status_code=404, detail="图片素材不存在")
-    asset_segment_index = asset.get("segment_index")
-    if asset_segment_index is not None and int(asset_segment_index) != int(segment_index):
-        raise HTTPException(status_code=409, detail="图片版本不属于当前分镜")
-    image_path = asset.get("path")
-    image_url = asset.get("url") or str(request.url_for("download_task_asset_file", task_id=task_id, asset_id=asset_id))
-    if _workspace_resolve_file(image_path) is None:
-        raise HTTPException(status_code=404, detail="图片文件不存在")
-    success = mysql_client.update_segment(task_id, segment_index, {
-        "image_path": image_path,
-        "image_url": image_url,
-        "image_prompt": asset.get("prompt") or previous.get("image_prompt") or "",
-        "image_status": "completed",
-        "image_error": None,
-        "image_error_code": None,
-        "image_error_meta": None,
-    })
-    if not success:
-        raise HTTPException(status_code=500, detail="切换图片失败")
-    _record_asset(
+    compatibility_payload = dict(payload or {})
+    compatibility_payload["asset_type"] = "image"
+    return await select_segment_asset(
         task_id,
-        "image",
-        "selected",
-        path=image_path,
-        url=image_url,
-        segment_index=segment_index,
-        prompt=asset.get("prompt"),
-        text=previous.get("text"),
+        segment_index,
+        request,
+        compatibility_payload,
     )
-    updated_task = mysql_client.get_task(task_id) or task_row
-    updated_segments = mysql_client.get_segments(task_id)
-    return {
-        "message": "图片已切换",
-        "image_path": image_path,
-        "image_url": image_url,
-        "image_prompt": asset.get("prompt") or previous.get("image_prompt") or "",
-        "previous_image_path": previous.get("image_path"),
-        "previous_image_url": previous.get("image_url"),
-        "snapshot_key": _plan_fingerprint(updated_task, updated_segments),
-    }
 
 
 @router.put("/tasks/{task_id}/segments/{segment_index}")
@@ -4092,6 +4484,7 @@ async def update_segment(
         updates['text'] = text
         if text != current.get("text"):
             updates['audio_status'] = 'stale' if current.get('audio_path') else 'pending'
+            updates['audio_mismatch_confirmed'] = 0
             updates['prompt_needs_review'] = 1
     if image_prompt is not None:
         updates['image_prompt'] = image_prompt
@@ -4328,18 +4721,23 @@ async def upload_image(task_id: str, segment_index: int, file: UploadFile = File
     )
     if not uploaded_asset:
         raise HTTPException(status_code=500, detail="上传图片版本保存失败")
-    if not mysql_client.update_segment(task_id, segment_index, {
-        'image_path': str(local_path),
-        'image_url': image_url,
-        'image_status': 'completed',
-        'image_error': storage_warning.safe_message if storage_warning else None,
-        'image_error_code': storage_warning.code.value if storage_warning else None,
-        'image_error_meta': storage_warning.metadata() if storage_warning else None,
-    }):
+    if not mysql_client.select_segment_asset(
+        task_id,
+        segment_index,
+        uploaded_asset,
+        "image",
+    ):
         raise HTTPException(
             status_code=500,
             detail="图片已保存到历史版本，但切换当前分镜失败",
         )
+    if storage_warning:
+        mysql_client.update_segment(task_id, segment_index, {
+            'image_error': storage_warning.safe_message,
+            'image_error_code': storage_warning.code.value,
+            'image_error_meta': storage_warning.metadata(),
+        })
+    _invalidate_review_first_draft(task_id, task_row)
     logger.info(f"[{task_id}] 数据库更新完成")
 
     logger.info(f"[{task_id}] ========== 图片上传完成 ==========")
@@ -4347,6 +4745,7 @@ async def upload_image(task_id: str, segment_index: int, file: UploadFile = File
     updated_segments = mysql_client.get_segments(task_id)
     return {
         "message": "图片上传成功",
+        "asset_id": uploaded_asset.get("asset_id"),
         "image_path": str(local_path),
         "image_url": image_url,
         "previous_image_path": segment.get("image_path"),

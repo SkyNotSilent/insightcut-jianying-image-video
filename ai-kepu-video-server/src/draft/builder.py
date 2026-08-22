@@ -43,10 +43,12 @@ class DraftBuilder:
         config_path: str = "config/settings.json",
         template_dir: str = "config/templates",
         canvas: Optional[dict] = None,
+        subtitle_options: Optional[dict] = None,
     ):
         self.config_path = Path(config_path)
         self.template_dir = Path(template_dir)
         self.canvas_override = canvas or {}
+        self.subtitle_options = subtitle_options or {}
         self.config = self._load_config()
 
     def _load_config(self) -> dict:
@@ -137,7 +139,7 @@ class DraftBuilder:
         else:
             draft_path_str = self.config.get("draft_path", "output/drafts")
 
-        subtitle_preset = subtitle_preset_for_canvas(width, height)
+        subtitle_preset = subtitle_preset_for_canvas(width, height, self.subtitle_options)
 
         # 使用传入的 output_dir 作为草稿目录
         draft_path = Path(draft_path_str)

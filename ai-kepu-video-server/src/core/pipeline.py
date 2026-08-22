@@ -30,13 +30,21 @@ class VideoEditorPipeline:
         config_path: str = "config/settings.json",
         output_dir: str = "output",
         canvas: dict = None,
+        subtitle_options: dict = None,
+        generation_options: dict = None,
     ):
         self.theme = theme
         self.config_path = config_path
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.article_generator = ArticleGenerator()
+        self.generation_options = {
+            **Config.generation_config(),
+            **(generation_options or {}),
+        }
+        self.article_generator = ArticleGenerator(
+            generation_config=self.generation_options
+        )
         self.script_rewriter = ScriptRewriter(self.article_generator)
         self.image_prompt_agent = ImagePromptAgent(self.article_generator)
         self.text_segmenter = TextSegmenter()
@@ -57,16 +65,28 @@ class VideoEditorPipeline:
             self._canvas_width = fallback_canvas["width"]
             self._canvas_height = fallback_canvas["height"]
 
-        self.image_generator = ImageGenerator(output_dir=str(self.output_dir / "images"))
-        self.voiceover_generator = VoiceOverGenerator(
-            output_dir=str(self.output_dir / "voiceovers")
+        self.image_generator = ImageGenerator(
+            output_dir=str(self.output_dir / "images"),
+            generation_config=self.generation_options,
         )
-        self.draft_builder = DraftBuilder(config_path=config_path, canvas=canvas)
+        self.voiceover_generator = VoiceOverGenerator(
+            output_dir=str(self.output_dir / "voiceovers"),
+            generation_config=self.generation_options,
+        )
+        self.draft_builder = DraftBuilder(
+            config_path=config_path,
+            canvas=canvas,
+            subtitle_options=subtitle_options,
+        )
 
         # FFmpeg 导出通道
         self._ffmpeg_enabled = _cfg.get("ffmpeg", {}).get("enabled", True)
         try:
-            self.ffmpeg_exporter = FFmpegExporter(config_path=config_path, canvas=canvas)
+            self.ffmpeg_exporter = FFmpegExporter(
+                config_path=config_path,
+                canvas=canvas,
+                subtitle_options=subtitle_options,
+            )
         except Exception as e:
             logger.warning(f"FFmpeg 导出不可用: {e}")
             self.ffmpeg_exporter = None
@@ -179,7 +199,7 @@ class VideoEditorPipeline:
         self.voiceover_files = [None] * len(self.segments)
 
         image_prompts = self.image_prompts
-        generation_config = Config.generation_config()
+        generation_config = self.generation_options
         image_workers = max(1, min(8, int(generation_config.get("image_concurrency", 8) or 8)))
         tts_workers = max(1, min(8, int(generation_config.get("tts_concurrency", 1) or 1)))
 
