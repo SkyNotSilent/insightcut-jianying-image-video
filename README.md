@@ -1,20 +1,71 @@
-# InsightCut — Jianying / 剪映 / CapCut AI 图片视频工作台
+<div align="center">
+  <img src="design-qa-artifacts/insightcut-mark.svg" width="112" alt="InsightCut 品牌图标" />
+  <h1>InsightCut</h1>
+  <p><strong>本地优先、可编辑、可恢复的 AI 图片视频工作台</strong></p>
+  <p>从主题或完整文稿出发，完成分镜、画面、配音、字幕、预览与剪映 / CapCut 导出。</p>
+  <p>
+    简体中文 · <a href="README_EN.md">English</a>
+  </p>
+  <p>
+    <a href="https://github.com/SkyNotSilent/ai-jianying-image-video/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/SkyNotSilent/ai-jianying-image-video/ci.yml?branch=master&amp;style=flat-square&amp;label=CI" alt="CI 状态" /></a>
+    <a href="https://github.com/SkyNotSilent/ai-jianying-image-video/stargazers"><img src="https://img.shields.io/github/stars/SkyNotSilent/ai-jianying-image-video?style=flat-square&amp;color=315FEA" alt="GitHub Stars" /></a>
+    <img src="https://img.shields.io/badge/Python-3.9-315FEA?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.9" />
+    <img src="https://img.shields.io/badge/React-19-315FEA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" />
+    <img src="https://img.shields.io/badge/Local--first-SQLite-F08A4B?style=flat-square" alt="本地优先" />
+  </p>
+  <p>
+    <a href="https://skynotsilent.github.io/ai-jianying-image-video/showcase/"><strong>成片案例</strong></a>
+    · <a href="#从零开始使用"><strong>快速开始</strong></a>
+    · <a href="#产品界面"><strong>产品界面</strong></a>
+    · <a href="docs/"><strong>项目文档</strong></a>
+    · <a href="https://github.com/SkyNotSilent/ai-jianying-image-video/issues"><strong>问题反馈</strong></a>
+  </p>
+</div>
 
-> 把文稿真正做成可修改、可恢复、还能继续精修的视频项目。
+---
 
-InsightCut 是一个本地优先的 AI 图片视频工作台，面向科普、认知、知识解说、观点表达和短视频创作。你可以从一个主题或一篇完整文稿开始，依次完成脚本整理、分镜拆分、图片生成、配音、字幕、预览和导出。
+InsightCut 面向科普、认知、知识解说、观点表达和短视频创作。它不是只交付一个 MP4 的“一键成片”页面，而是一套可以持续工作的本地项目：文稿、分镜、图片提示词、图片、配音、字幕和导出记录都会被保留下来。
 
-我们没有把它做成另一块需要从零搭建的复杂画布。InsightCut 更在意的是：一条经常断掉的视频生产链路，能不能顺畅地跑完；默认结果不满意时，能不能只修改其中一个分镜；中途失败后，已经生成的图片和配音还在不在。
+<table>
+  <tr>
+    <td width="33%"><strong>🎬 生成以后还能改</strong><br />逐段修改文字、提示词、图片和配音，不必为一个细节重跑整条链路。</td>
+    <td width="33%"><strong>🛟 失败以后接着做</strong><br />任务中断不会清空已完成内容，只重试缺失或失败的素材。</td>
+    <td width="33%"><strong>📦 成片与工程都交付</strong><br />输出 MP4、分镜素材包，以及可继续精修的剪映 / CapCut 草稿。</td>
+  </tr>
+</table>
 
-项目与剪映、CapCut、字节跳动没有隶属或合作关系。
+> 数据库、媒体文件、配置和声音克隆参考音频默认保存在本机。InsightCut 与剪映、CapCut、字节跳动没有隶属或合作关系。
+
+## 产品界面
+
+### 文稿与创作设置
+
+在同一页面输入主题或完整文稿，并在生成前集中确认项目名称、画面比例、视觉风格与文案风格。
 
 ![InsightCut 新版文稿工作台真实界面](design-qa-artifacts/readme-home.png)
 
+### 生产工作台
+
+![InsightCut 新版分镜生产工作台与素材版本界面](design-qa-artifacts/readme-workspace.png)
+
+新版界面采用白色工作面、品牌蓝与暖橙状态色，并使用统一的全局创作壳层：左侧可以在文稿、工作台、导出中心、项目资产、模板库和设置之间切换；顶部保留真实的 01–06 生产阶段；中间完成逐段预览；右侧集中处理当前分镜、素材版本、项目素材和全片设置。
+
+图片与配音不会在重新生成时覆盖旧文件。每次生成、重新生成、上传和跨分镜复用都会形成可追溯版本，可以随时查看、试听和恢复；恢复历史版本不会再次调用模型。
+
+### 项目资产库
+
+![InsightCut 项目资产库：项目筛选、状态与真实画面封面](design-qa-artifacts/readme-assets.png)
+
+项目资产库集中展示草稿、生成中、可继续、已完成和失败可恢复的项目，并支持按状态、画面风格和时长筛选。项目卡片使用真实生成画面作为封面，可以直接回到对应项目继续预览、修复或导出。
+
 ## 真实成片案例
 
-下面展示的不是效果稿，也不是为 README 拼接的静态样片。每个案例都来自 InsightCut 本地任务的真实成片，可以直接在当前页面播放。
+下面的案例全部来自 InsightCut 本地任务，不是为 README 拼接的静态效果稿。任务完成后，对应的文稿、分镜、提示词、图片、配音、字幕和导出记录仍可继续修改。
 
-[打开完整在线成片展示](https://skynotsilent.github.io/ai-jianying-image-video/showcase/)
+<p align="center"><a href="https://skynotsilent.github.io/ai-jianying-image-video/showcase/"><strong>浏览完整在线成片展厅 →</strong></a></p>
+
+<details>
+<summary><strong>在 README 中展开 5 个真实成片</strong></summary>
 
 ### 小岛经济学
 
@@ -46,21 +97,7 @@ https://github.com/user-attachments/assets/7d7b050e-25c2-4f4f-8cf5-1ab3f7157a95
 
 https://github.com/user-attachments/assets/e4695fbc-2339-4102-b631-bcf61df63264
 
-这些案例完成后，对应的文稿、分镜、画面提示词、图片、配音、字幕和导出记录仍然保存在项目中，可以继续逐段检查和修改。
-
-## 新版生产工作台
-
-![InsightCut 新版分镜生产工作台与素材版本界面](design-qa-artifacts/readme-workspace.png)
-
-新版界面采用白色工作面、品牌蓝与暖橙状态色，并使用统一的全局创作壳层：左侧可以在文稿、工作台、导出中心、项目资产、模板库和设置之间切换；顶部保留真实的 01–06 生产阶段；中间完成逐段预览；右侧集中处理当前分镜、素材版本、项目素材和全片设置。
-
-图片与配音不会在重新生成时覆盖旧文件。每次生成、重新生成、上传和跨分镜复用都会形成可追溯版本，可以随时查看、试听和恢复；恢复历史版本不会再次调用模型。
-
-### 项目资产库
-
-![InsightCut 项目资产库：项目筛选、状态与真实画面封面](design-qa-artifacts/readme-assets.png)
-
-项目资产库集中展示草稿、生成中、可继续、已完成和失败可恢复的项目，并支持按状态、画面风格和时长筛选。项目卡片使用真实生成画面作为封面，可以直接回到对应项目继续预览、修复或导出。
+</details>
 
 ## InsightCut 是什么
 
