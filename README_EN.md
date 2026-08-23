@@ -11,12 +11,12 @@
     <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/stargazers"><img src="https://img.shields.io/github/stars/SkyNotSilent/insightcut-jianying-image-video?style=flat-square&amp;color=315FEA" alt="GitHub stars" /></a>
     <img src="https://img.shields.io/badge/Python-3.9-315FEA?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.9" />
     <img src="https://img.shields.io/badge/React-19-315FEA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" />
-    <img src="https://img.shields.io/badge/Local--first-SQLite-F08A4B?style=flat-square" alt="Local first" />
+    <img src="https://img.shields.io/badge/Local--first-SQLite-D46F44?style=flat-square" alt="Local first" />
   </p>
   <p>
     <a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>Showcase</strong></a>
     · <a href="#quick-start"><strong>Quick Start</strong></a>
-    · <a href="#product-tour"><strong>Product Tour</strong></a>
+    · <a href="#start-from-one-line"><strong>Product Tour</strong></a>
     · <a href="docs/"><strong>Documentation</strong></a>
     · <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/issues"><strong>Issues</strong></a>
   </p>
@@ -36,19 +36,77 @@ InsightCut is built for explainers, educational videos, knowledge content, opini
 
 > The database, media files, configuration, and voice-clone references stay on your machine by default. InsightCut is not affiliated with Jianying, CapCut, ByteDance, or their subsidiaries.
 
-## Product tour
+## Start from one line
 
-### Manuscript and creation settings
-
-Start from a short topic or paste a complete manuscript. Confirm the project name, aspect ratio, visual style, and writing style before generation.
+Start from a short topic or paste a complete manuscript. Confirm the project name, aspect ratio, visual style, and writing style before generation. Topic mode expands the input into a full manuscript for review, while script mode preserves the supplied text.
 
 ![InsightCut manuscript editor and creation settings](design-qa-artifacts/readme-home.png)
+
+## Real output
+
+Every example below was produced from a real local InsightCut task. The underlying manuscript, segments, prompts, images, voiceovers, subtitles, and export records remain editable after completion.
+
+<p align="center"><a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>Open the complete video showcase →</strong></a></p>
+
+### Who Am I? Where Am I? Where Am I Going?
+
+**Topic mode** · Original input: `我是谁？我在哪？我要去何方？`
+
+**Warm, reflective writing** · **Felt art** · 16:9 · 20 segments · 01:09
+
+InsightCut expanded those 14 Chinese characters into the manuscript, storyboard, prompts, images, voiceover, subtitles, and final video. No extra script was written for the showcase.
+
+[![Play Who Am I? Where Am I? Where Am I Going?](docs/showcase/thumbs/who-am-i-16x9.jpg)](https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/#who-am-i-16x9)
+
+[▶ Play it in the online showcase](https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/#who-am-i-16x9)
+
+### Island Economics
+
+**Script mode** · Input: a complete educational manuscript
+
+**Educational writing** · **Felt art** · 16:9 · 01:02
+
+https://github.com/user-attachments/assets/34833f83-5416-41b9-9a75-b47ddd0e5f05
+
+### Thirty Years East, Thirty Years West
+
+**Topic mode** · Original input: `30 年河东，30 年河西，莫欺少年穷`
+
+**Educational writing** · **Ghibli-inspired** · 16:9 · 18 segments · 00:44
+
+https://github.com/user-attachments/assets/989b52b5-2f3e-4ed6-9a36-6c26fd02f606
+
+### Growth Is the Best Remedy
+
+**Script mode** · Input: a complete motivational manuscript
+
+**Motivational writing** · **Cinematic** · 16:9 · 01:03
+
+https://github.com/user-attachments/assets/de662301-8653-43bf-bf54-31a6d7d2dba1
+
+### Why Busy Adults Need Deliberate Empty Space
+
+**Script mode** · Input: a complete educational manuscript
+
+**Educational writing** · **Cinematic** · 9:16 · 00:55
+
+https://github.com/user-attachments/assets/7d7b050e-25c2-4f4f-8cf5-1ab3f7157a95
+
+### Do Not Mistake Busyness for Growth
+
+**Script mode** · Input: a complete spoken-word manuscript
+
+**Conversational writing** · **Chinese illustration** · 3:4 · 00:52
+
+https://github.com/user-attachments/assets/e4695fbc-2339-4102-b631-bcf61df63264
+
+## Production and project surfaces
 
 ### Production workspace
 
 ![InsightCut production workspace with storyboard navigation, preview, and asset versions](design-qa-artifacts/readme-workspace.png)
 
-The shared workspace keeps the six real production stages visible. Browse segments on the left, preview the current scene in the center, and manage segment settings, immutable asset versions, project media, and full-video settings on the right.
+The spatial workspace keeps all six production stages visible. Browse segments on the left, preview the current scene in the center, and manage segment settings, immutable asset versions, project media, and full-video settings on the right.
 
 Regeneration and uploads append new versions instead of overwriting old files. Existing versions can be reviewed, played, and restored without another model call.
 
@@ -57,47 +115,6 @@ Regeneration and uploads append new versions instead of overwriting old files. E
 ![InsightCut project library with filters, status, and generated covers](design-qa-artifacts/readme-assets.png)
 
 The project library brings together drafts, running jobs, resumable projects, completed work, and recoverable failures. Filter by status, visual style, or duration, then return directly to preview, recovery, or export.
-
-## Real output
-
-Every example below was produced from a real local InsightCut task. The underlying manuscript, segments, prompts, images, voiceovers, subtitles, and export records remain editable after completion.
-
-<p align="center"><a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>Open the complete video showcase →</strong></a></p>
-
-<details>
-<summary><strong>View five example videos in this README</strong></summary>
-
-### Island Economics
-
-Manuscript mode · 16:9 · 01:02
-
-https://github.com/user-attachments/assets/34833f83-5416-41b9-9a75-b47ddd0e5f05
-
-### Thirty Years East, Thirty Years West
-
-Topic mode · 16:9 · 18 segments · 00:44
-
-https://github.com/user-attachments/assets/989b52b5-2f3e-4ed6-9a36-6c26fd02f606
-
-### Growth Is the Best Remedy
-
-Manuscript mode · 16:9 · 01:03
-
-https://github.com/user-attachments/assets/de662301-8653-43bf-bf54-31a6d7d2dba1
-
-### Why Busy Adults Need Deliberate Empty Space
-
-Manuscript mode · 9:16 · 00:55
-
-https://github.com/user-attachments/assets/7d7b050e-25c2-4f4f-8cf5-1ab3f7157a95
-
-### Do Not Mistake Busyness for Growth
-
-Manuscript mode · 3:4 · 00:52
-
-https://github.com/user-attachments/assets/e4695fbc-2339-4102-b631-bcf61df63264
-
-</details>
 
 ## How the workflow fits together
 

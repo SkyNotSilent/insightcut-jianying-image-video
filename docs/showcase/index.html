@@ -12,8 +12,10 @@
       --text: #111827;
       --muted: #64748b;
       --line: #dbe3ef;
-      --accent: #2563eb;
-      --accent-soft: #eef4ff;
+      --accent: #315fea;
+      --accent-soft: #eef3ff;
+      --orange: #d46f44;
+      --orange-soft: #fff3ec;
     }
 
     * {
@@ -99,13 +101,19 @@
     }
 
     .tag {
-      border: 1px solid #cfe0ff;
+      border: 1px solid #d9e2ff;
       border-radius: 999px;
       background: var(--accent-soft);
       color: #1d4ed8;
       padding: 5px 10px;
       font-size: 13px;
       line-height: 1;
+    }
+
+    .sample:first-child .tag:first-child {
+      border-color: color-mix(in srgb, var(--orange) 36%, white);
+      background: var(--orange-soft);
+      color: #a44627;
     }
 
     .meta p {
@@ -163,6 +171,26 @@
     </header>
 
     <section class="grid" aria-label="Generated video samples">
+      <article class="sample" id="who-am-i-16x9">
+        <div class="player">
+          <video controls preload="metadata" poster="./thumbs/who-am-i-16x9.jpg" src="./videos/who-am-i-16x9.mp4"></video>
+        </div>
+        <div class="meta">
+          <h2>我是谁？我在哪？我要去何方？</h2>
+          <div class="tags">
+            <span class="tag">主题模式</span>
+            <span class="tag">原始输入 14 字</span>
+            <span class="tag">温暖感人</span>
+            <span class="tag">毛毡风</span>
+            <span class="tag">16:9</span>
+            <span class="tag">20 个分镜</span>
+            <span class="tag">01:09</span>
+          </div>
+          <p>用户只输入“我是谁？我在哪？我要去何方？”，模型扩写完整文稿并完成分镜、图片、配音、字幕与成片，没有为展厅额外补写脚本。</p>
+          <div class="links"><a href="./videos/who-am-i-16x9.mp4">打开展示 MP4</a></div>
+        </div>
+      </article>
+
       <article class="sample" id="island-economics-16x9">
         <div class="player">
           <video controls preload="metadata" poster="./thumbs/book-16x9.jpg" src="./videos/book-16x9.mp4"></video>
@@ -171,10 +199,12 @@
           <h2>小岛经济学</h2>
           <div class="tags">
             <span class="tag">文稿模式</span>
+            <span class="tag">科普知识</span>
+            <span class="tag">毛毡风</span>
             <span class="tag">16:9</span>
             <span class="tag">01:02</span>
           </div>
-          <p>从完整知识文稿生成分镜、图片、配音、字幕和 MP4，展示横屏科普内容效果。</p>
+          <p>输入完整知识文稿，严格保留原文，再生成分镜、图片、配音、字幕和横屏 MP4。</p>
           <div class="links"><a href="./videos/book-16x9.mp4">打开展示 MP4</a></div>
         </div>
       </article>
@@ -187,11 +217,13 @@
           <h2>30 年河东，30 年河西，莫欺少年穷</h2>
           <div class="tags">
             <span class="tag">主题模式</span>
+            <span class="tag">知识科普</span>
+            <span class="tag">吉卜力</span>
             <span class="tag">16:9</span>
             <span class="tag">18 个分镜</span>
             <span class="tag">00:44</span>
           </div>
-          <p>从一句主题扩写成完整文稿，再生成分镜画面、配音、字幕与横屏成片。</p>
+          <p>原始输入就是“30 年河东，30 年河西，莫欺少年穷”，再由模型扩写文稿并完成横屏成片。</p>
           <div class="links"><a href="./videos/thirty-years-16x9.mp4">打开展示 MP4</a></div>
         </div>
       </article>
@@ -204,6 +236,8 @@
           <h2>成长就是最好的解药</h2>
           <div class="tags">
             <span class="tag">文稿模式</span>
+            <span class="tag">励志向上</span>
+            <span class="tag">电影质感</span>
             <span class="tag">16:9</span>
             <span class="tag">01:03</span>
           </div>
@@ -220,6 +254,8 @@
           <h2>为什么成年人越忙越需要刻意留白？</h2>
           <div class="tags">
             <span class="tag">文稿模式</span>
+            <span class="tag">知识科普</span>
+            <span class="tag">电影质感</span>
             <span class="tag">9:16</span>
             <span class="tag">00:55</span>
           </div>
@@ -236,6 +272,8 @@
           <h2>别把忙碌误当成成长</h2>
           <div class="tags">
             <span class="tag">文稿模式</span>
+            <span class="tag">轻松口语</span>
+            <span class="tag">国风</span>
             <span class="tag">3:4</span>
             <span class="tag">00:52</span>
           </div>

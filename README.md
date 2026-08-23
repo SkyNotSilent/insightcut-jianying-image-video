@@ -11,12 +11,12 @@
     <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/stargazers"><img src="https://img.shields.io/github/stars/SkyNotSilent/insightcut-jianying-image-video?style=flat-square&amp;color=315FEA" alt="GitHub Stars" /></a>
     <img src="https://img.shields.io/badge/Python-3.9-315FEA?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.9" />
     <img src="https://img.shields.io/badge/React-19-315FEA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" />
-    <img src="https://img.shields.io/badge/Local--first-SQLite-F08A4B?style=flat-square" alt="本地优先" />
+    <img src="https://img.shields.io/badge/Local--first-SQLite-D46F44?style=flat-square" alt="本地优先" />
   </p>
   <p>
     <a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>成片案例</strong></a>
     · <a href="#从零开始使用"><strong>快速开始</strong></a>
-    · <a href="#产品界面"><strong>产品界面</strong></a>
+    · <a href="#从一句输入开始"><strong>产品界面</strong></a>
     · <a href="docs/"><strong>项目文档</strong></a>
     · <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/issues"><strong>问题反馈</strong></a>
   </p>
@@ -36,19 +36,77 @@ InsightCut 面向科普、认知、知识解说、观点表达和短视频创作
 
 > 数据库、媒体文件、配置和声音克隆参考音频默认保存在本机。InsightCut 与剪映、CapCut、字节跳动没有隶属或合作关系。
 
-## 产品界面
+## 从一句输入开始
 
-### 文稿与创作设置
-
-在同一页面输入主题或完整文稿，并在生成前集中确认项目名称、画面比例、视觉风格与文案风格。
+在同一页面输入一句主题或完整文稿，并在生成前集中确认项目名称、画面比例、视觉风格与文案风格。主题模式会先扩写完整文稿并交给你确认；脚本模式严格保留原文。
 
 ![InsightCut 新版文稿工作台真实界面](design-qa-artifacts/readme-home.png)
+
+## 真实成片案例
+
+下面的案例全部来自 InsightCut 本地任务，不是为 README 拼接的静态效果稿。任务完成后，对应的文稿、分镜、提示词、图片、配音、字幕和导出记录仍可继续修改。
+
+<p align="center"><a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>浏览完整在线成片展厅 →</strong></a></p>
+
+### 我是谁？我在哪？我要去何方？
+
+**主题模式** · 原始输入：`我是谁？我在哪？我要去何方？`
+
+**温暖感人文案** · **毛毡风** · 16:9 · 20 个分镜 · 01:09
+
+模型从这 14 个字扩写完整文稿，再生成分镜、画面提示词、图片、配音、字幕和成片。没有为案例额外补写脚本。
+
+[![播放《我是谁？我在哪？我要去何方？》](docs/showcase/thumbs/who-am-i-16x9.jpg)](https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/#who-am-i-16x9)
+
+[▶ 在在线展厅直接播放](https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/#who-am-i-16x9)
+
+### 小岛经济学
+
+**脚本模式** · 输入：完整知识文稿
+
+**科普知识文案** · **毛毡风** · 16:9 · 01:02
+
+https://github.com/user-attachments/assets/34833f83-5416-41b9-9a75-b47ddd0e5f05
+
+### 30 年河东，30 年河西，莫欺少年穷
+
+**主题模式** · 原始输入：`30 年河东，30 年河西，莫欺少年穷`
+
+**知识科普文案** · **吉卜力** · 16:9 · 18 个分镜 · 00:44
+
+https://github.com/user-attachments/assets/989b52b5-2f3e-4ed6-9a36-6c26fd02f606
+
+### 成长就是最好的解药
+
+**脚本模式** · 输入：完整励志文稿
+
+**励志向上文案** · **电影质感** · 16:9 · 01:03
+
+https://github.com/user-attachments/assets/de662301-8653-43bf-bf54-31a6d7d2dba1
+
+### 为什么成年人越忙越需要刻意留白？
+
+**脚本模式** · 输入：完整知识文稿
+
+**知识科普文案** · **电影质感** · 9:16 · 00:55
+
+https://github.com/user-attachments/assets/7d7b050e-25c2-4f4f-8cf5-1ab3f7157a95
+
+### 别把忙碌误当成成长
+
+**脚本模式** · 输入：完整口播文稿
+
+**轻松口语文案** · **国风** · 3:4 · 00:52
+
+https://github.com/user-attachments/assets/e4695fbc-2339-4102-b631-bcf61df63264
+
+## 生产与资产界面
 
 ### 生产工作台
 
 ![InsightCut 新版分镜生产工作台与素材版本界面](design-qa-artifacts/readme-workspace.png)
 
-新版界面采用白色工作面、品牌蓝与暖橙状态色，并使用统一的全局创作壳层：左侧可以在文稿、工作台、导出中心、项目资产、模板库和设置之间切换；顶部保留真实的 01–06 生产阶段；中间完成逐段预览；右侧集中处理当前分镜、素材版本、项目素材和全片设置。
+白色空间化工作台保留真实的 01–06 生产阶段：左侧浏览分镜，中间完成即时预览，右侧处理当前分镜、素材版本、项目素材和全片设置。
 
 图片与配音不会在重新生成时覆盖旧文件。每次生成、重新生成、上传和跨分镜复用都会形成可追溯版本，可以随时查看、试听和恢复；恢复历史版本不会再次调用模型。
 
@@ -57,47 +115,6 @@ InsightCut 面向科普、认知、知识解说、观点表达和短视频创作
 ![InsightCut 项目资产库：项目筛选、状态与真实画面封面](design-qa-artifacts/readme-assets.png)
 
 项目资产库集中展示草稿、生成中、可继续、已完成和失败可恢复的项目，并支持按状态、画面风格和时长筛选。项目卡片使用真实生成画面作为封面，可以直接回到对应项目继续预览、修复或导出。
-
-## 真实成片案例
-
-下面的案例全部来自 InsightCut 本地任务，不是为 README 拼接的静态效果稿。任务完成后，对应的文稿、分镜、提示词、图片、配音、字幕和导出记录仍可继续修改。
-
-<p align="center"><a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>浏览完整在线成片展厅 →</strong></a></p>
-
-<details>
-<summary><strong>在 README 中展开 5 个真实成片</strong></summary>
-
-### 小岛经济学
-
-文稿模式 · 16:9 · 01:02
-
-https://github.com/user-attachments/assets/34833f83-5416-41b9-9a75-b47ddd0e5f05
-
-### 30 年河东，30 年河西，莫欺少年穷
-
-主题模式 · 16:9 · 18 个分镜 · 00:44
-
-https://github.com/user-attachments/assets/989b52b5-2f3e-4ed6-9a36-6c26fd02f606
-
-### 成长就是最好的解药
-
-文稿模式 · 16:9 · 01:03
-
-https://github.com/user-attachments/assets/de662301-8653-43bf-bf54-31a6d7d2dba1
-
-### 为什么成年人越忙越需要刻意留白？
-
-文稿模式 · 9:16 · 00:55
-
-https://github.com/user-attachments/assets/7d7b050e-25c2-4f4f-8cf5-1ab3f7157a95
-
-### 别把忙碌误当成成长
-
-文稿模式 · 3:4 · 00:52
-
-https://github.com/user-attachments/assets/e4695fbc-2339-4102-b631-bcf61df63264
-
-</details>
 
 ## InsightCut 是什么
 
