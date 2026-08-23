@@ -5,7 +5,7 @@
 Recommended public repository name:
 
 ```text
-ai-jianying-image-video
+insightcut-jianying-image-video
 ```
 
 Product name:
@@ -17,30 +17,32 @@ InsightCut
 Recommended description:
 
 ```text
-AI 图片视频生成工作台：文稿/主题转视频，批量生成认知视频，分镜可编辑，生成效果远胜剪映一键成片，支持 MP4 与剪映草稿/CapCut draft 导出。
+剪映 / Jianying / CapCut 可编辑图片视频工作台 · InsightCut：文稿转分镜、图片、配音、字幕和可编辑草稿，支持 MP4、素材包与剪映草稿导出。
 ```
 
 Recommended topics:
 
 ```text
-jianying
-capcut
 ai-video
-ai-image-video
+ai-video-generation
+ai-video-generator
 image-to-video
+script-to-video
+video-automation
 explainer-video
 storyboard
 tts
-fastapi
-vue3
+voice-cloning
 local-first
-ai-video-generator
-image-generation
+fastapi
+react
 ffmpeg
+sqlite
+capcut
+capcut-draft
+jianying
 jianying-draft
 jianying-caogao
-batch-video-generation
-batch-image-video
 ```
 
 Public disclaimer:

@@ -7,18 +7,18 @@
     简体中文 · <a href="README_EN.md">English</a>
   </p>
   <p>
-    <a href="https://github.com/SkyNotSilent/ai-jianying-image-video/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/SkyNotSilent/ai-jianying-image-video/ci.yml?branch=master&amp;style=flat-square&amp;label=CI" alt="CI 状态" /></a>
-    <a href="https://github.com/SkyNotSilent/ai-jianying-image-video/stargazers"><img src="https://img.shields.io/github/stars/SkyNotSilent/ai-jianying-image-video?style=flat-square&amp;color=315FEA" alt="GitHub Stars" /></a>
+    <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/SkyNotSilent/insightcut-jianying-image-video/ci.yml?branch=master&amp;style=flat-square&amp;label=CI" alt="CI 状态" /></a>
+    <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/stargazers"><img src="https://img.shields.io/github/stars/SkyNotSilent/insightcut-jianying-image-video?style=flat-square&amp;color=315FEA" alt="GitHub Stars" /></a>
     <img src="https://img.shields.io/badge/Python-3.9-315FEA?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.9" />
     <img src="https://img.shields.io/badge/React-19-315FEA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" />
     <img src="https://img.shields.io/badge/Local--first-SQLite-F08A4B?style=flat-square" alt="本地优先" />
   </p>
   <p>
-    <a href="https://skynotsilent.github.io/ai-jianying-image-video/showcase/"><strong>成片案例</strong></a>
+    <a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>成片案例</strong></a>
     · <a href="#从零开始使用"><strong>快速开始</strong></a>
     · <a href="#产品界面"><strong>产品界面</strong></a>
     · <a href="docs/"><strong>项目文档</strong></a>
-    · <a href="https://github.com/SkyNotSilent/ai-jianying-image-video/issues"><strong>问题反馈</strong></a>
+    · <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/issues"><strong>问题反馈</strong></a>
   </p>
 </div>
 
@@ -62,7 +62,7 @@ InsightCut 面向科普、认知、知识解说、观点表达和短视频创作
 
 下面的案例全部来自 InsightCut 本地任务，不是为 README 拼接的静态效果稿。任务完成后，对应的文稿、分镜、提示词、图片、配音、字幕和导出记录仍可继续修改。
 
-<p align="center"><a href="https://skynotsilent.github.io/ai-jianying-image-video/showcase/"><strong>浏览完整在线成片展厅 →</strong></a></p>
+<p align="center"><a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>浏览完整在线成片展厅 →</strong></a></p>
 
 <details>
 <summary><strong>在 README 中展开 5 个真实成片</strong></summary>
@@ -143,8 +143,8 @@ https://github.com/user-attachments/assets/e4695fbc-2339-4102-b631-bcf61df63264
 当前后端使用 Python 3.9，前端使用 React 19、React Router 7 和 Vite 4。还需要 Node.js、npm，以及可用的 FFmpeg；项目安装的 `imageio-ffmpeg` 可以提供内置二进制，系统 PATH 中已有 FFmpeg 时会优先使用系统版本。
 
 ```bash
-git clone https://github.com/SkyNotSilent/ai-jianying-image-video.git
-cd ai-jianying-image-video
+git clone https://github.com/SkyNotSilent/insightcut-jianying-image-video.git
+cd insightcut-jianying-image-video
 ```
 
 准备后端：
@@ -295,7 +295,7 @@ MiMo 通过 OpenAI 兼容的 Chat Completions 形式返回音频，不使用常�
 ## 项目结构
 
 ```text
-ai-jianying-image-video/
+insightcut-jianying-image-video/
 ├── ai-kepu-video-server/          # FastAPI 后端
 │   ├── api_server.py              # Web API 入口
 │   ├── src/                       # 生文、生图、配音、任务和导出逻辑

@@ -7,18 +7,18 @@
     <a href="README.md">简体中文</a> · English
   </p>
   <p>
-    <a href="https://github.com/SkyNotSilent/ai-jianying-image-video/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/SkyNotSilent/ai-jianying-image-video/ci.yml?branch=master&amp;style=flat-square&amp;label=CI" alt="CI status" /></a>
-    <a href="https://github.com/SkyNotSilent/ai-jianying-image-video/stargazers"><img src="https://img.shields.io/github/stars/SkyNotSilent/ai-jianying-image-video?style=flat-square&amp;color=315FEA" alt="GitHub stars" /></a>
+    <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/SkyNotSilent/insightcut-jianying-image-video/ci.yml?branch=master&amp;style=flat-square&amp;label=CI" alt="CI status" /></a>
+    <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/stargazers"><img src="https://img.shields.io/github/stars/SkyNotSilent/insightcut-jianying-image-video?style=flat-square&amp;color=315FEA" alt="GitHub stars" /></a>
     <img src="https://img.shields.io/badge/Python-3.9-315FEA?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.9" />
     <img src="https://img.shields.io/badge/React-19-315FEA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" />
     <img src="https://img.shields.io/badge/Local--first-SQLite-F08A4B?style=flat-square" alt="Local first" />
   </p>
   <p>
-    <a href="https://skynotsilent.github.io/ai-jianying-image-video/showcase/"><strong>Showcase</strong></a>
+    <a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>Showcase</strong></a>
     · <a href="#quick-start"><strong>Quick Start</strong></a>
     · <a href="#product-tour"><strong>Product Tour</strong></a>
     · <a href="docs/"><strong>Documentation</strong></a>
-    · <a href="https://github.com/SkyNotSilent/ai-jianying-image-video/issues"><strong>Issues</strong></a>
+    · <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/issues"><strong>Issues</strong></a>
   </p>
 </div>
 
@@ -62,7 +62,7 @@ The project library brings together drafts, running jobs, resumable projects, co
 
 Every example below was produced from a real local InsightCut task. The underlying manuscript, segments, prompts, images, voiceovers, subtitles, and export records remain editable after completion.
 
-<p align="center"><a href="https://skynotsilent.github.io/ai-jianying-image-video/showcase/"><strong>Open the complete video showcase →</strong></a></p>
+<p align="center"><a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>Open the complete video showcase →</strong></a></p>
 
 <details>
 <summary><strong>View five example videos in this README</strong></summary>
@@ -137,8 +137,8 @@ Unlike a typical one-click generator, InsightCut treats each run as a project th
 ### 1. Clone
 
 ~~~bash
-git clone https://github.com/SkyNotSilent/ai-jianying-image-video.git
-cd ai-jianying-image-video
+git clone https://github.com/SkyNotSilent/insightcut-jianying-image-video.git
+cd insightcut-jianying-image-video
 ~~~
 
 ### 2. Install the backend
@@ -264,7 +264,7 @@ From that state you can:
 ## Repository layout
 
 ~~~text
-ai-jianying-image-video/
+insightcut-jianying-image-video/
 ├── ai-kepu-video-server/          # FastAPI backend
 │   ├── api_server.py              # Web API entry point
 │   ├── src/                       # generation, tasks, media, and export logic
