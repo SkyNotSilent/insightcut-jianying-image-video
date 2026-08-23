@@ -82,16 +82,16 @@ test.beforeEach(async ({ page }) => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ generation: { prompt_concurrency: 4, image_concurrency: 8, tts_concurrency: 1, retry_count: 2, retry_interval_seconds: 5 } }) })
       return
     }
-    if (path.endsWith('/tasks/ui-assets/assets')) {
+    if (path.endsWith('/tasks/ui-assets/asset-library')) {
       const segmentIndex = Number(url.searchParams.get('segment_index') || 0)
       const assets = [
         { asset_id: `current-${segmentIndex}`, segment_index: segmentIndex, source: 'generated', path: `/tmp/current-${segmentIndex}.png`, file_url: image('#7a9caf'), has_file: true, label: '当前生成版本', created_at: '2026-08-19 14:20:00' },
         { asset_id: `old-${segmentIndex}`, segment_index: segmentIndex, source: 'regenerated', path: `/tmp/old-${segmentIndex}.png`, file_url: image('#675b52'), has_file: true, label: '重生成版本', created_at: '2026-08-19 14:10:00' },
       ]
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(assets) })
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: assets, page: 1, page_size: 60, total: assets.length }) })
       return
     }
-    if (path.endsWith('/tasks/ui-assets/segments/0/select-image')) {
+    if (path.endsWith('/tasks/ui-assets/segments/0/select-asset')) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ image_path: '/tmp/old-0.png', image_url: image('#675b52'), image_prompt: segments[0].image_prompt }) })
       return
     }
@@ -105,10 +105,10 @@ test('keeps the center preview focused and exposes image history plus lightbox f
 
   await expect(page.getByRole('region', { name: '分镜导航' })).toBeVisible()
   await expect(page.locator('.workspace-current-assets')).toHaveCount(0)
-  await expect(page.getByText('当前分镜素材')).toHaveCount(0)
+  await expect(page.locator('.workspace-preview').getByText('当前分镜素材')).toHaveCount(0)
   const inspector = page.getByRole('complementary', { name: '生产设置' })
   await expect(inspector.getByRole('button', { name: '上传替换' })).toBeVisible()
-  await expect(inspector.getByRole('button', { name: '历史版本' })).toBeVisible()
+  await expect(inspector.getByRole('button', { name: '素材版本' })).toBeVisible()
 
   const overflow = await page.evaluate(() => ({
     document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -117,12 +117,13 @@ test('keeps the center preview focused and exposes image history plus lightbox f
   expect(overflow.document).toBe(0)
   expect(overflow.workspace).toBe(0)
 
-  await inspector.getByRole('button', { name: '历史版本' }).click()
-  await expect(inspector.getByRole('region', { name: '素材版本' })).toBeVisible()
+  await inspector.getByRole('button', { name: '素材版本' }).click()
+  await expect(inspector.getByRole('tabpanel', { name: '素材版本' })).toBeVisible()
   await expect(inspector.getByText('2 个版本')).toBeVisible()
   await page.getByRole('button', { name: /^重生成版本/ }).click()
   await expect(page.getByText('已切换为这个图片版本')).toBeVisible()
 
+  await inspector.getByRole('tab', { name: '当前分镜' }).click()
   await inspector.getByRole('button', { name: '查看画面' }).click()
   await expect(page.getByRole('dialog', { name: '分镜 1' })).toBeVisible()
   await expect(page.getByRole('dialog', { name: '分镜 1' }).getByText('暖色纸张上的岛屿与灯塔')).toBeVisible()

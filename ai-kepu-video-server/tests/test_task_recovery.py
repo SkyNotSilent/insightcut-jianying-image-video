@@ -3118,6 +3118,10 @@ def test_review_first_asset_generation_honors_segment_voice_override(
     ]
     assert calls[1]["speed_level"] == "fast"
     assert calls[1]["volume_ratio"] == 1.2
+    assert rows[0]["audio_voice_type"] in {None, ""}
+    assert rows[0]["audio_tts_options_json"] in {None, ""}
+    assert rows[1]["audio_voice_type"].startswith("doubao:")
+    assert json.loads(rows[1]["audio_tts_options_json"])["speed_level"] == "fast"
     assert rows[0]["audio_voice_type"] == ""
     assert rows[1]["audio_voice_type"] == "doubao:zh_male_jieshuoxiaoming_moon_bigtts"
     task = executor_db.get_task("voice-override-task")

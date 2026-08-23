@@ -10,8 +10,10 @@ from src.draft.voice_catalog import (
     DOUBAO_PRESET_VOICES,
     MIMO_DEFAULT_ENABLED_IDS,
     build_voice_key,
+    encode_segment_tts_override,
     normalize_tts_options,
     parse_voice_key,
+    segment_tts_override,
     speed_instruction,
 )
 
@@ -40,12 +42,19 @@ def test_infers_known_bare_voice_ids_without_breaking_legacy_tasks():
 
 
 def test_normalizes_provider_specific_tts_options():
+    normal_doubao = normalize_tts_options(
+        {"speed_level": "normal", "volume_ratio": 1.0},
+        {},
+        provider="doubao",
+    )
+    assert normal_doubao == {"speed_level": "normal", "speed_ratio": 1.0, "volume_ratio": 1.0}
+
     doubao = normalize_tts_options(
         {"speed_level": "fast", "volume_ratio": 9, "style_prompt": "ignored"},
         {"speed_level": "normal", "volume_ratio": 1.0},
         provider="doubao",
     )
-    assert doubao == {"speed_level": "fast", "speed_ratio": 1.5, "volume_ratio": 2.0}
+    assert doubao == {"speed_level": "fast", "speed_ratio": 1.25, "volume_ratio": 2.0}
 
     mimo = normalize_tts_options(
         {"speed_level": "very_slow", "style_prompt": "温柔克制"},
@@ -58,6 +67,38 @@ def test_normalizes_provider_specific_tts_options():
         "speed_instruction": "语速很慢，停顿充分，保持清晰。",
     }
     assert speed_instruction("normal") == ""
+
+
+def test_segment_speed_override_distinguishes_user_choice_from_legacy_snapshot():
+    task_options = {"speed_level": "normal", "volume_ratio": 1.0}
+
+    inherited, inherited_active = segment_tts_override(
+        '{"speed_level":"normal","volume_ratio":1.0}',
+        segment_voice_type="doubao:voice-a",
+        task_voice_type="doubao:voice-a",
+        task_options=task_options,
+    )
+    assert inherited == {}
+    assert inherited_active is False
+
+    legacy_slow, legacy_active = segment_tts_override(
+        '{"speed_level":"very_slow","volume_ratio":1.0}',
+        segment_voice_type="doubao:voice-a",
+        task_voice_type="doubao:voice-a",
+        task_options=task_options,
+    )
+    assert legacy_slow["speed_level"] == "very_slow"
+    assert legacy_active is True
+
+    explicit = encode_segment_tts_override({"speed_level": "normal"})
+    decoded, explicit_active = segment_tts_override(
+        explicit,
+        segment_voice_type="",
+        task_voice_type="doubao:voice-a",
+        task_options=task_options,
+    )
+    assert decoded == {"speed_level": "normal"}
+    assert explicit_active is True
 
 
 def test_normalizes_multi_provider_runtime_config():

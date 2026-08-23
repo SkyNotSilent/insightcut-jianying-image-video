@@ -150,7 +150,7 @@ class VoiceOverGenerator:
         text: str,
         filename: str = None,
         voice_type: str = None,
-        speed_ratio: float = 1.25,
+        speed_ratio: float = 1.0,
         volume_ratio: float = 1.0,
     ) -> str:
         output_path = self._output_path(text, filename)

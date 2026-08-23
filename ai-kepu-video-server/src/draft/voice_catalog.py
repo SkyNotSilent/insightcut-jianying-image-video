@@ -1,5 +1,6 @@
 """统一 TTS 音色目录与参数归一化。"""
 
+import json
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional
 
@@ -47,10 +48,10 @@ DOUBAO_VOICE_IDS = frozenset(voice[0] for voice in DOUBAO_PRESET_VOICES)
 SPEED_LEVELS = ("very_slow", "slow", "normal", "fast", "very_fast")
 DOUBAO_SPEED_RATIOS = {
     "very_slow": 0.8,
-    "slow": 1.0,
-    "normal": 1.25,
-    "fast": 1.5,
-    "very_fast": 1.75,
+    "slow": 0.9,
+    "normal": 1.0,
+    "fast": 1.25,
+    "very_fast": 1.5,
 }
 MIMO_SPEED_INSTRUCTIONS = {
     "very_slow": "语速很慢，停顿充分，保持清晰。",
@@ -59,6 +60,8 @@ MIMO_SPEED_INSTRUCTIONS = {
     "fast": "语速偏快，节奏紧凑，保持清晰。",
     "very_fast": "语速很快，节奏明快，但保持清晰。",
 }
+
+SEGMENT_TTS_OVERRIDE_MARKER = "_segment_override"
 
 
 @dataclass(frozen=True)
@@ -142,6 +145,55 @@ def normalize_tts_options(
         "style_prompt": style,
         "speed_instruction": speed_instruction(level),
     }
+
+
+def _parse_tts_options(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
+
+
+def segment_tts_override(
+    value: Any,
+    *,
+    segment_voice_type: str = "",
+    task_voice_type: str = "",
+    task_options: Optional[Dict[str, Any]] = None,
+) -> tuple[Dict[str, Any], bool]:
+    """Return the explicit per-segment TTS override and whether it is active.
+
+    Older builds wrote the *effective* task options into every segment after
+    generation.  Those rows are not overrides when they still match the task
+    snapshot.  A differing legacy snapshot is exposed as an override so the UI
+    never hides the parameters that produced the currently selected audio.
+    """
+    parsed = _parse_tts_options(value)
+    marked = bool(parsed.pop(SEGMENT_TTS_OVERRIDE_MARKER, False))
+    parsed.pop("speed_ratio", None)
+    parsed.pop("speed_instruction", None)
+    comparable_task = _parse_tts_options(task_options)
+    comparable_task.pop("speed_ratio", None)
+    comparable_task.pop("speed_instruction", None)
+    legacy_difference = bool(parsed and parsed != comparable_task)
+    active = marked or legacy_difference
+    return (parsed if active else {}), active
+
+
+def encode_segment_tts_override(options: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Mark user-selected segment parameters without confusing them with snapshots."""
+    parsed = _parse_tts_options(options)
+    parsed.pop(SEGMENT_TTS_OVERRIDE_MARKER, None)
+    parsed.pop("speed_ratio", None)
+    parsed.pop("speed_instruction", None)
+    if not parsed:
+        return {}
+    return {**parsed, SEGMENT_TTS_OVERRIDE_MARKER: True}
 
 
 def normalized_enabled_providers(value: Any) -> Iterable[str]:

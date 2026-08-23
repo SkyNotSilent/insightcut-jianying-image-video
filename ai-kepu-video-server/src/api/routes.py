@@ -50,8 +50,10 @@ from src.export.asset_package import (
 )
 from src.draft.voice_catalog import (
     build_voice_key,
+    encode_segment_tts_override,
     normalize_tts_options,
     parse_voice_key,
+    segment_tts_override,
 )
 from src.draft.voice_clone import VoiceCloneStore
 from src.draft.voice_preview import PRESET_VOICE_PREVIEW_TEXT, VoicePreviewService
@@ -2802,7 +2804,12 @@ def _workspace_operation_payload(operation: Optional[dict]) -> Optional[dict]:
     }
 
 
-def _workspace_segment_payload(segment: dict, request: Request) -> dict:
+def _workspace_segment_payload(
+    segment: dict,
+    request: Request,
+    task_voice_type: str = "",
+    task_tts_options: Optional[dict] = None,
+) -> dict:
     image_file_ready = _workspace_file_ready(segment.get("image_path"))
     audio_file_ready = _workspace_file_ready(segment.get("audio_path"))
     image_status = segment.get("image_status") or (
@@ -2858,6 +2865,12 @@ def _workspace_segment_payload(segment: dict, request: Request) -> dict:
     if audio_status in {"completed", "stale"} and audio_file_ready and audio_error:
         audio_storage_warning = audio_error_meta
         audio_error = audio_error_code = audio_error_meta = None
+    audio_tts_options, audio_tts_options_overridden = segment_tts_override(
+        segment.get("audio_tts_options_json"),
+        segment_voice_type=segment.get("audio_voice_type") or "",
+        task_voice_type=task_voice_type,
+        task_options=task_tts_options,
+    )
     payload = {
         "id": segment.get("id"),
         "task_id": segment.get("task_id"),
@@ -2892,6 +2905,8 @@ def _workspace_segment_payload(segment: dict, request: Request) -> dict:
         "audio_storage_warning": audio_storage_warning,
         "audio_voice_type": segment.get("audio_voice_type"),
         "audio_tts_options_json": segment.get("audio_tts_options_json"),
+        "audio_tts_options": audio_tts_options,
+        "audio_tts_options_overridden": audio_tts_options_overridden,
         "selected_image_asset_id": segment.get("selected_image_asset_id"),
         "selected_audio_asset_id": segment.get("selected_audio_asset_id"),
         "audio_mismatch_confirmed": bool(segment.get("audio_mismatch_confirmed")),
@@ -2975,7 +2990,13 @@ async def get_task_workspace(task_id: str, request: Request):
     parts = str(task_row.get("style") or "").split("|", 2)
     result = task_row.get("result") or {}
     workspace_segments = [
-        _workspace_segment_payload(segment, request) for segment in segments
+        _workspace_segment_payload(
+            segment,
+            request,
+            task_voice_type=task_row.get("voice_type") or "",
+            task_tts_options=parsed_options,
+        )
+        for segment in segments
     ]
     storage_warnings = [
         {
@@ -3136,7 +3157,14 @@ async def update_task_workspace_settings(task_id: str, payload: dict = Body(...)
         raise HTTPException(status_code=500, detail="保存工作台设置失败")
 
     style_changed = style != old_style or ratio != old_ratio
-    voice_changed = voice_type != old_voice or tts_options_json != task_row.get("tts_options_json")
+    voice_type_changed = voice_type != old_voice
+    tts_options_changed = tts_options_json != task_row.get("tts_options_json")
+    voice_changed = voice_type_changed or tts_options_changed
+    old_task_tts_options = _parse_options_json(task_row.get("tts_options_json"))
+    next_task_tts_options = _parse_options_json(tts_options_json)
+    for computed_field in ("speed_ratio", "speed_instruction"):
+        old_task_tts_options.pop(computed_field, None)
+        next_task_tts_options.pop(computed_field, None)
     subtitle_changed = subtitle_options != old_subtitle_options
     segments = mysql_client.get_segments(task_id)
     for segment in segments:
@@ -3152,12 +3180,31 @@ async def update_task_workspace_settings(task_id: str, payload: dict = Body(...)
                     "prompt_error": None,
                     "prompt_needs_review": 0,
                 })
-        if voice_changed and (
-            not segment.get("audio_voice_type") or segment.get("audio_voice_type") == old_voice
-        ):
+        segment_options, segment_options_overridden = segment_tts_override(
+            segment.get("audio_tts_options_json"),
+            segment_voice_type=segment.get("audio_voice_type") or "",
+            task_voice_type=old_voice,
+            task_options=old_task_tts_options,
+        )
+        has_custom_voice = bool(
+            segment.get("audio_voice_type")
+            and segment.get("audio_voice_type") != old_voice
+        )
+        voice_affects_segment = voice_type_changed and not has_custom_voice
+        changed_tts_fields = {
+            key
+            for key in set(old_task_tts_options) | set(next_task_tts_options)
+            if old_task_tts_options.get(key) != next_task_tts_options.get(key)
+        }
+        tts_options_affect_segment = tts_options_changed and any(
+            key not in segment_options for key in changed_tts_fields
+        )
+        if voice_changed and (voice_affects_segment or tts_options_affect_segment):
             segment_updates["audio_status"] = "stale" if segment.get("audio_path") else "pending"
             if segment.get("audio_voice_type") == old_voice:
                 segment_updates["audio_voice_type"] = ""
+            if not segment_options_overridden and segment.get("audio_tts_options_json"):
+                segment_updates["audio_tts_options_json"] = ""
         if segment_updates:
             mysql_client.update_segment(task_id, segment["segment_index"], segment_updates)
 
@@ -3845,7 +3892,16 @@ async def get_segments(task_id: str, request: Request):
 
     # Reuse the workspace serializer so legacy callers receive the same safe
     # structured errors and storage-warning semantics.
-    return [_workspace_segment_payload(seg, request) for seg in segments]
+    task_row = mysql_client.get_task(task_id) or {}
+    return [
+        _workspace_segment_payload(
+            seg,
+            request,
+            task_voice_type=task_row.get("voice_type") or "",
+            task_tts_options=_parse_options_json(task_row.get("tts_options_json")),
+        )
+        for seg in segments
+    ]
 
 
 @router.get("/tasks/{task_id}/render-config")
@@ -4505,8 +4561,25 @@ async def update_segment(
         if audio_voice_type != (current.get('audio_voice_type') or task.voice_type):
             updates['audio_status'] = 'stale' if current.get('audio_path') else 'pending'
     if audio_tts_options is not None:
-        updates['audio_tts_options_json'] = json.dumps(audio_tts_options, ensure_ascii=False)
-        updates['audio_status'] = 'stale' if current.get('audio_path') else 'pending'
+        effective_voice = (
+            audio_voice_type
+            if audio_voice_type is not None and audio_voice_type
+            else current.get('audio_voice_type') or task.voice_type
+        )
+        if audio_tts_options:
+            normalized_options = _snapshot_tts_options(effective_voice, audio_tts_options)
+            override_options = encode_segment_tts_override({
+                key: value
+                for key, value in normalized_options.items()
+                if key in {"speed_level", "volume_ratio", "style_prompt"}
+                and (key == "speed_level" or key in audio_tts_options)
+            })
+        else:
+            override_options = {}
+        next_options_json = json.dumps(override_options, ensure_ascii=False)
+        updates['audio_tts_options_json'] = next_options_json
+        if next_options_json != (current.get('audio_tts_options_json') or ""):
+            updates['audio_status'] = 'stale' if current.get('audio_path') else 'pending'
 
     if not updates:
         raise HTTPException(status_code=400, detail="至少需要提供一个更新字段")
@@ -4615,20 +4688,21 @@ async def regenerate_audio(
         effective_voice,
         body_options or inherited_options,
     )
+    target = {
+        "segment_index": segment_index,
+        "asset_type": "audio",
+    }
+    if requested_voice:
+        target["voice_type"] = effective_voice
+    if body_options or requested_voice:
+        target["tts_options"] = effective_options
     return await retry_task_assets(
         task_id,
         response,
         {
             "snapshot_key": _plan_fingerprint(task_row, segments),
             "scope": "selected",
-            "targets": [
-                {
-                    "segment_index": segment_index,
-                    "asset_type": "audio",
-                    "voice_type": effective_voice,
-                    "tts_options": effective_options,
-                }
-            ],
+            "targets": [target],
         },
     )
 

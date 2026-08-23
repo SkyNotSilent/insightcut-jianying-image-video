@@ -27,6 +27,7 @@ test('primary editorial text and action colors meet WCAG AA contrast', () => {
     ['ink-soft', 'surface'],
     ['ink-muted', 'surface'],
     ['accent', 'surface'],
+    ['orange-strong', 'surface'],
     ['success', 'surface'],
     ['warning', 'surface'],
     ['danger', 'surface'],

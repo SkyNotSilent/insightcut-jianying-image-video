@@ -10,6 +10,7 @@ import {
   nextPreviewState,
   normalizeVoiceCatalog,
   reconcileTtsVoiceConfig,
+  resolveSegmentVoiceSettings,
   resolveEnabledVoiceDefaults,
   speedLevelAtPosition,
   speedLevelPosition,
@@ -110,11 +111,11 @@ test('merges inherited options and emits only provider-relevant task fields', ()
 
 test('uses the same doubao speed multipliers as final TTS generation', () => {
   assert.equal(doubaoSpeedRatio('very_slow'), 0.8)
-  assert.equal(doubaoSpeedRatio('slow'), 1)
-  assert.equal(doubaoSpeedRatio('normal'), 1.25)
-  assert.equal(doubaoSpeedRatio('fast'), 1.5)
-  assert.equal(doubaoSpeedRatio('very_fast'), 1.75)
-  assert.equal(doubaoSpeedRatio('unknown'), 1.25)
+  assert.equal(doubaoSpeedRatio('slow'), 0.9)
+  assert.equal(doubaoSpeedRatio('normal'), 1)
+  assert.equal(doubaoSpeedRatio('fast'), 1.25)
+  assert.equal(doubaoSpeedRatio('very_fast'), 1.5)
+  assert.equal(doubaoSpeedRatio('unknown'), 1)
 })
 
 test('maps the linked speed slider to the same five speed levels', () => {
@@ -125,6 +126,28 @@ test('maps the linked speed slider to the same five speed levels', () => {
   assert.equal(speedLevelAtPosition(0), 'very_slow')
   assert.equal(speedLevelAtPosition(3), 'fast')
   assert.equal(speedLevelAtPosition(99), 'very_fast')
+})
+
+test('resolves a visible per-segment speed override over the full-film setting', () => {
+  const inherited = resolveSegmentVoiceSettings({
+    audio_voice_type: '',
+    audio_tts_options: {},
+  }, {
+    voice_type: 'doubao:zh_male_jieshuoxiaoming_moon_bigtts',
+    tts_options: { speed_level: 'normal', volume_ratio: 1 },
+  })
+  assert.equal(inherited.speedOverride, '')
+  assert.equal(inherited.effectiveOptions.speed_level, 'normal')
+
+  const overridden = resolveSegmentVoiceSettings({
+    audio_tts_options: { speed_level: 'very_slow' },
+  }, {
+    voice_type: 'doubao:zh_male_jieshuoxiaoming_moon_bigtts',
+    tts_options: { speed_level: 'normal', volume_ratio: 1 },
+  })
+  assert.equal(overridden.speedOverride, 'very_slow')
+  assert.equal(overridden.effectiveOptions.speed_level, 'very_slow')
+  assert.equal(overridden.effectiveOptions.volume_ratio, 1)
 })
 
 test('preview state keeps one active voice and ignores stale completions', () => {

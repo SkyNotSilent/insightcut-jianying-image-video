@@ -138,8 +138,8 @@
 .export-option-draft { grid-column: 1 / -1; }
 
 .export-option.is-preferred {
-  border-top: 3px solid var(--color-accent);
-  padding-top: 18px;
+  border-color: color-mix(in srgb, var(--color-accent) 58%, var(--color-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 7%, transparent), var(--shadow-sm);
 }
 
 .export-option.is-preferred::before {

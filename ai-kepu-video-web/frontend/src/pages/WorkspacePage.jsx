@@ -45,11 +45,13 @@ import { WorkspaceInspector } from '../components/WorkspaceInspector'
 import { WorkspaceSettingsOverlay } from '../components/WorkspaceSettingsOverlay'
 import { WorkspaceStoryboardNav } from '../components/WorkspaceStoryboardNav'
 import { WorkspaceStageNavigator } from '../components/WorkspaceStageNavigator'
+import { BrandLoader } from '../components/ui/BrandLoader'
 import { Lightbox } from '../components/ui/Lightbox'
 import { usePollingResource } from '../hooks/usePollingResource'
 import { errorToastMessage, getErrorPresentation } from '../lib/errorMessages'
 import { normalizeConcurrency, normalizeRetryCount, normalizeRetryInterval } from '../lib/settingsConfig'
 import { toast } from '../lib/toast'
+import { clearSelectedProject, selectProject } from '../lib/projectSelection'
 import { mergeTtsOptions, nextPreviewState, normalizeVoiceCatalog } from '../lib/voiceCatalog'
 import { normalizeMediaUrl } from '../utils/mediaUrl'
 import { ratioOptions, visualStyles } from '../utils/projectDrafts'
@@ -69,7 +71,6 @@ import './workspace-page.css'
 
 const LAST_VOICE_KEY = 'insightcut:last-voice'
 const LAST_TTS_OPTIONS_KEY = 'insightcut:last-tts-options'
-const LAST_WORKSPACE_KEY = 'insightcut:last-workspace'
 const LAST_RUNTIME_KEY = 'insightcut:last-generation-runtime'
 const ACTIVE_EXPORT_STATUSES = new Set(['pending', 'processing'])
 const WORKSPACE_TOUR_KEY = 'insightcut:workspace-tour:v1'
@@ -382,23 +383,14 @@ export function WorkspacePage() {
       if (!hasConfirmedVoice && window.matchMedia?.('(max-width: 780px)').matches) selectMobilePane('settings')
     }
 
-    localStorage.setItem(LAST_WORKSPACE_KEY, JSON.stringify({ taskId, name: data.name, path: `/workspace/${taskId}` }))
-    window.dispatchEvent(new Event('insightcut:workspace'))
+    selectProject({ taskId, name: data.name })
     setLoading(false)
     setLoadError('')
     setMissingTask(false)
   }, [applyPendingEdits, selectMobilePane, setWorkspaceSettingsOpen, taskId])
 
   const handleMissingTask = useCallback(() => {
-    try {
-      const recent = JSON.parse(localStorage.getItem(LAST_WORKSPACE_KEY) || 'null')
-      if (recent?.taskId === taskId) {
-        localStorage.removeItem(LAST_WORKSPACE_KEY)
-        window.dispatchEvent(new Event('insightcut:workspace'))
-      }
-    } catch {
-      localStorage.removeItem(LAST_WORKSPACE_KEY)
-    }
+    clearSelectedProject(taskId)
     setMissingTask(true)
     setWorkspace(null)
     workspaceRef.current = null
@@ -740,13 +732,13 @@ export function WorkspacePage() {
     setVoicePreviewState(current => nextPreviewState(current, { type: 'stop' }))
   }, [])
 
-  const previewSelectedVoice = async voice => {
+  const previewSelectedVoice = async (voice, optionsOverride = ttsOptions) => {
     if (voicePreviewState.playingVoice === voice.id) return stopVoicePreview()
     stopVoicePreview()
     const token = ++previewTokenRef.current
     setVoicePreviewState(current => nextPreviewState(current, { type: 'start', voiceId: voice.id, token }))
     try {
-      const result = await previewVoice({ voice_type: voice.id, tts_options: ttsOptions })
+      const result = await previewVoice({ voice_type: voice.id, tts_options: optionsOverride })
       const audio = new Audio(normalizeMediaUrl(result.url))
       voiceAudioRef.current = audio
       audio.onended = stopVoicePreview
@@ -767,7 +759,16 @@ export function WorkspacePage() {
       })
       if (patch.voice_type) localStorage.setItem(LAST_VOICE_KEY, patch.voice_type)
       if (patch.tts_options) localStorage.setItem(LAST_TTS_OPTIONS_KEY, JSON.stringify(patch.tts_options))
-      setWorkspace(current => ({ ...current, plan_version: result.plan_version, snapshot_key: result.snapshot_key }))
+      setWorkspace(current => {
+        const next = {
+          ...current,
+          ...patch,
+          plan_version: result.plan_version,
+          snapshot_key: result.snapshot_key,
+        }
+        workspaceRef.current = next
+        return next
+      })
       workspacePolling.refresh()
       return true
     } catch (error) {
@@ -781,6 +782,16 @@ export function WorkspacePage() {
 
   const confirmVoice = async () => {
     if (!selectedVoice) return toast.warning('请先选择一个配音音色')
+    setBusyAction('voice-validation')
+    try {
+      await previewVoice(
+        { voice_type: selectedVoice, tts_options: ttsOptions },
+        { silent: true },
+      )
+    } catch (error) {
+      setBusyAction('')
+      return toast.error(`该音色当前无法生成配音：${errorToastMessage(error)}`)
+    }
     const saved = await saveWorkspaceSettings({ voice_type: selectedVoice, tts_options: ttsOptions, voice_confirmed: true })
     if (saved) {
       setWorkspaceSettingsOpen(false)
@@ -827,6 +838,9 @@ export function WorkspacePage() {
   }
 
   const regenerateOne = async (segment, target) => {
+    if (savingCount || Object.keys(pendingRef.current).length) {
+      return toast.info('请等待当前分镜设置保存完成')
+    }
     setBusyAction(`${target}:${segment.segment_index}`)
     try {
       await retryTaskAssets(taskId, {
@@ -1100,7 +1114,7 @@ export function WorkspacePage() {
     })
   }
 
-  if (loading) return <main className="workspace-loading"><div className="workspace-loading-card" role="status" aria-live="polite"><span className="workspace-orbit" aria-hidden="true" /><strong>正在恢复生产工作台</strong><p>分镜、提示词和已有素材正在从本地项目中载入。</p></div></main>
+  if (loading) return <main className="workspace-loading"><BrandLoader label="正在恢复生产工作台" /></main>
   if (loadError || !workspace) return <main className="workspace-loading"><div className="workspace-error-card" role="alert"><CircleAlert size={24} /><strong>{missingTask ? '项目已不存在' : '工作台暂时无法打开'}</strong><p>{loadError}</p><div>{!missingTask ? <button type="button" className="button button-secondary" onClick={() => { setLoading(true); setLoadError(''); workspacePolling.reconnect() }}>重新连接</button> : null}<button type="button" className="button button-primary" onClick={() => navigate('/assets')}>返回项目资产</button></div></div></main>
 
   const closeSettingsPanel = () => {
@@ -1301,6 +1315,7 @@ export function WorkspacePage() {
         onVoiceChange={id => { stopVoicePreview(); setSelectedVoice(id); setTtsOptions(mergeTtsOptions({}, workspace.tts_options || {}, id.startsWith('doubao:') ? 'doubao' : 'mimo')) }}
         onTtsOptionsChange={options => { stopVoicePreview(); setTtsOptions(options) }}
         onVoicePreview={previewSelectedVoice}
+        onStopVoicePreview={stopVoicePreview}
         voicePreviewState={voicePreviewState}
         onConfirmVoice={confirmVoice}
         voiceReady={voiceReady}
@@ -1312,7 +1327,11 @@ export function WorkspacePage() {
         normalizeRuntime={normalizeRuntimeConfig}
         onSaveRuntime={saveRuntimeConfig}
         onOpenApi={() => navigate(`/workspace/${taskId}/settings`)}
-        onAssetSelected={() => workspacePolling.refresh()}
+        onAssetSelected={({ assetType }) => {
+          toast.success(assetType === 'audio' ? '已切换为这个配音版本' : '已切换为这个图片版本')
+          workspacePolling.refresh()
+        }}
+        pendingEdits={Boolean(savingCount || Object.keys(pendingRef.current).length)}
       />
     </div>
 
@@ -1336,7 +1355,7 @@ export function WorkspacePage() {
       previewValid={Boolean(exportState?.preview?.valid)}
       canEnterExport={canEnterExport}
       onResume={resumeGeneration}
-      onConfirmVoice={() => { setWorkspaceSettingsOpen(true); if (window.matchMedia?.('(max-width: 780px)').matches) selectMobilePane('settings') }}
+      onConfirmVoice={confirmVoice}
       onGenerateAssets={startAssets}
       onFullVideo={createFullVideoPreview}
       onCancelFullVideo={cancelFullVideoPreview}

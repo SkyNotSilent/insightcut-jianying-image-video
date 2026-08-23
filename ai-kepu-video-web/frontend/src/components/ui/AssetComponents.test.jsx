@@ -5,6 +5,23 @@ import { AssetHistory } from './AssetHistory'
 import { AudioCard } from './AudioCard'
 import { ImageCard } from './ImageCard'
 import { Lightbox } from './Lightbox'
+import { VisualStyleCard } from './VisualStyleCard'
+
+describe('VisualStyleCard', () => {
+  it('keeps the visible label and description without a duplicate hover tooltip', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(<VisualStyleCard style={{ value: 'cinematic', label: '电影质感', description: '真实光影与镜头叙事', image: '/cinematic.png' }} selected onSelect={onSelect} />)
+
+    const card = screen.getByRole('button', { name: /电影质感.*真实光影与镜头叙事/ })
+    expect(screen.getByText('电影质感')).toBeInTheDocument()
+    expect(screen.getByText('真实光影与镜头叙事')).toBeInTheDocument()
+    await user.hover(card)
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    await user.click(card)
+    expect(onSelect).toHaveBeenCalledWith('cinematic')
+  })
+})
 
 describe('ImageCard', () => {
   it.each([

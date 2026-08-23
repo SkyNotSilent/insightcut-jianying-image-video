@@ -6,6 +6,7 @@ import { Modal } from '../components/Modal'
 import { EmptyStateCard } from '../components/ui/EmptyStateCard'
 import { VisualStyleCard } from '../components/ui/VisualStyleCard'
 import { toast } from '../lib/toast'
+import { selectProject } from '../lib/projectSelection'
 import { createDraft, estimateDuration, estimateSegments, getDraft, getLatestDraft, ratioOptions, saveDraft, textStyles, visualStyles } from '../utils/projectDrafts'
 import './creation-flow.css'
 
@@ -169,8 +170,7 @@ export function ManuscriptPage() {
       const saved = { ...prepared, created_task_id: result.task_id }
       draftRef.current = saved
       persistDraft(saved, setDraft, setSaveState, setSavedAt)
-      localStorage.setItem('insightcut:last-workspace', JSON.stringify({ taskId: result.task_id, name: prepared.name, path: `/workspace/${result.task_id}` }))
-      window.dispatchEvent(new Event('insightcut:workspace'))
+      selectProject({ taskId: result.task_id, name: prepared.name })
       toast.success('正在生成预案')
       navigate(`/workspace/${result.task_id}`)
     } catch (error) {
@@ -257,36 +257,6 @@ export function ManuscriptPage() {
   return (
     <main className="creation-page manuscript-page">
       <section className="manuscript-layout">
-        <aside className="work-panel project-panel" aria-label="项目控制">
-          <PanelHeading eyebrow="项目设置" title="文稿准备" />
-          <label className="field-label">项目名称
-            <input value={draft.name || ''} maxLength="100" placeholder="给这条视频起个名字" onChange={event => patchDraft({ name: event.target.value })} />
-            <small>{String(draft.name || '').length}/100</small>
-          </label>
-          <fieldset className="control-group"><legend>创作方式</legend>
-            <div className="segmented-control" aria-label="创作方式">
-              <button type="button" className={isTheme ? 'is-selected' : ''} onClick={() => patchDraft({ input_mode: 'theme' })}>主题模式</button>
-              <button type="button" className={!isTheme ? 'is-selected' : ''} onClick={() => patchDraft({ input_mode: 'script' })}>脚本模式</button>
-            </div>
-            <p>{isTheme ? '输入一句主题，由模型扩写成完整视频文稿。' : '直接使用你输入或导入的完整文稿生产视频。'}</p>
-          </fieldset>
-          {isTheme ? <fieldset className="control-group"><legend>扩写字数</legend>
-            <div className="length-control">
-              <input aria-label="扩写字数滑块" type="range" min="0" max="2000" step="50" value={normalizeLength(draft.length)} onChange={event => patchDraft({ length: Number(event.target.value) })} />
-              <label className="length-number"><span className="sr-only">扩写字数</span><input type="number" min="0" max="2000" step="50" value={draft.length === 0 ? '' : normalizeLength(draft.length)} placeholder="自动" onChange={event => patchDraft({ length: event.target.value === '' ? 0 : normalizeLength(event.target.value) })} onBlur={() => patchDraft({ length: normalizeLength(draftRef.current.length) })} /></label>
-            </div>
-            <small>0 为自动，手动范围 50-2000 字。</small>
-          </fieldset> : <>
-            <fieldset className="control-group"><legend>内容来源</legend>
-              <div className="button-row"><button type="button" className="button button-secondary" onClick={insertExample}><Sparkles size={16} />插入示例</button><button type="button" className="button button-secondary" onClick={() => documentInput.current?.click()}><FileUp size={16} />导入文档</button></div>
-              <small>支持 TXT、Markdown、Word DOCX、PDF</small>
-              <input ref={documentInput} type="file" hidden accept=".txt,.md,.markdown,.docx,.pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf" onChange={importDocument} />
-            </fieldset>
-            <div className="button-row"><button type="button" className="button button-secondary" onClick={pasteFromClipboard}><ClipboardPaste size={16} />粘贴文本</button><button type="button" className="button button-secondary" onClick={() => patchDraft({ manuscript: '' })}>清空文稿</button></div>
-          </>}
-          <section className="summary-strip"><span>{draftSummary.label}</span><strong>{draftSummary.value}</strong><p>{draftSummary.description}</p></section>
-        </aside>
-
         <section className="writing-canvas" aria-label="文稿编辑画布">
           <header className="canvas-heading"><div><p>{isTheme ? '主题模式' : '脚本画布'}</p><h1>{isTheme ? '主题输入' : '文稿编辑'}</h1></div><span className={`save-indicator ${saveState}`}><CheckCircle2 size={16} />{saveState === 'saved' ? `已保存 ${savedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : '保存中...'}</span></header>
           <div className={`paper-editor-shell ${isEmpty ? 'is-empty' : ''}`}>
@@ -317,12 +287,47 @@ export function ManuscriptPage() {
           </div>
         </section>
 
-        <aside className="work-panel production-options" aria-label="生产设置">
-          <PanelHeading eyebrow="生产设置" title="画面设置" />
-          <fieldset className="control-group"><legend>画面风格</legend><div className="style-thumbnail-grid">{visualStyles.map(style => <VisualStyleCard key={style.value} style={style} selected={draft.visual_style === style.value} onSelect={value => patchDraft({ visual_style: value })} />)}</div></fieldset>
-          <fieldset className="control-group"><legend>视频比例</legend><div className="segmented-control">{ratioOptions.map(ratio => <button type="button" key={ratio} className={draft.ratio === ratio ? 'is-selected' : ''} onClick={() => patchDraft({ ratio })}>{ratio}</button>)}</div></fieldset>
-          <label className="field-label">创作风格<select value={draft.text_style || '知识科普'} onChange={event => patchDraft({ text_style: event.target.value })}>{textStyles.map(style => <option key={style}>{style}</option>)}</select></label>
-          <button type="button" className="button button-primary continue-button" disabled={starting} onClick={continueToProduction}>{starting ? '正在创建预案…' : !isTheme && !String(draft.manuscript || '').trim() ? '插入示例并继续' : '生成预案'}</button>
+        <aside className="work-panel manuscript-settings" aria-label="文稿设置">
+          <PanelHeading eyebrow="创作配置" title="文稿设置" />
+
+          <section className="manuscript-settings-section" aria-labelledby="manuscript-basics-heading">
+            <header className="manuscript-settings-heading"><span>01</span><h3 id="manuscript-basics-heading">内容基础</h3></header>
+            <label className="field-label">项目名称
+              <input value={draft.name || ''} maxLength="100" placeholder="给这条视频起个名字" onChange={event => patchDraft({ name: event.target.value })} />
+              <small>{String(draft.name || '').length}/100</small>
+            </label>
+            <fieldset className="control-group"><legend>创作方式</legend>
+              <div className="segmented-control" aria-label="创作方式">
+                <button type="button" className={isTheme ? 'is-selected' : ''} onClick={() => patchDraft({ input_mode: 'theme' })}>主题模式</button>
+                <button type="button" className={!isTheme ? 'is-selected' : ''} onClick={() => patchDraft({ input_mode: 'script' })}>脚本模式</button>
+              </div>
+              <p>{isTheme ? '输入一句主题，由模型扩写成完整视频文稿。' : '严格使用输入或导入的原文，不自动改写。'}</p>
+            </fieldset>
+            {isTheme ? <fieldset className="control-group"><legend>扩写字数</legend>
+              <div className="length-control">
+                <input aria-label="扩写字数滑块" type="range" min="0" max="2000" step="50" value={normalizeLength(draft.length)} onChange={event => patchDraft({ length: Number(event.target.value) })} />
+                <label className="length-number"><span className="sr-only">扩写字数</span><input type="number" min="0" max="2000" step="50" value={draft.length === 0 ? '' : normalizeLength(draft.length)} placeholder="自动" onChange={event => patchDraft({ length: event.target.value === '' ? 0 : normalizeLength(event.target.value) })} onBlur={() => patchDraft({ length: normalizeLength(draftRef.current.length) })} /></label>
+              </div>
+              <small>0 为自动，手动范围 50-2000 字。</small>
+            </fieldset> : <fieldset className="control-group"><legend>任务来源</legend>
+              <div className="button-row"><button type="button" className="button button-secondary" onClick={insertExample}><Sparkles size={16} />插入示例</button><button type="button" className="button button-secondary" onClick={() => documentInput.current?.click()}><FileUp size={16} />导入文档</button></div>
+              <div className="button-row"><button type="button" className="button button-secondary" onClick={pasteFromClipboard}><ClipboardPaste size={16} />粘贴文本</button><button type="button" className="button button-secondary" onClick={() => patchDraft({ manuscript: '' })}>清空文稿</button></div>
+              <small>支持 TXT、Markdown、Word DOCX、PDF</small>
+              <input ref={documentInput} type="file" hidden accept=".txt,.md,.markdown,.docx,.pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf" onChange={importDocument} />
+            </fieldset>}
+            <section className="summary-strip"><span>{draftSummary.label}</span><strong>{draftSummary.value}</strong><p>{draftSummary.description}</p></section>
+          </section>
+
+          <section className="manuscript-settings-section" aria-labelledby="visual-preset-heading">
+            <header className="manuscript-settings-heading"><span>02</span><h3 id="visual-preset-heading">生产预设</h3></header>
+            <fieldset className="control-group"><legend>画面风格</legend><div className="style-thumbnail-grid">{visualStyles.map(style => <VisualStyleCard key={style.value} style={style} selected={draft.visual_style === style.value} onSelect={value => patchDraft({ visual_style: value })} />)}</div></fieldset>
+            <fieldset className="control-group"><legend>视频比例</legend><div className="segmented-control">{ratioOptions.map(ratio => <button type="button" key={ratio} className={draft.ratio === ratio ? 'is-selected' : ''} onClick={() => patchDraft({ ratio })}>{ratio}</button>)}</div></fieldset>
+            <label className="field-label">创作风格<select value={draft.text_style || '知识科普'} onChange={event => patchDraft({ text_style: event.target.value })}>{textStyles.map(style => <option key={style}>{style}</option>)}</select></label>
+          </section>
+
+          <footer className="settings-action-bar">
+            <button type="button" className="button button-primary continue-button" disabled={starting} onClick={continueToProduction}>{starting ? '正在创建预案…' : !isTheme && !String(draft.manuscript || '').trim() ? '插入示例并继续' : '生成预案'}</button>
+          </footer>
         </aside>
       </section>
       <Modal

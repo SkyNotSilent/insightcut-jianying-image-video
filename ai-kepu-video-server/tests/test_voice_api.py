@@ -1138,6 +1138,58 @@ def test_segment_audio_snapshot_columns_round_trip(temp_db):
     assert json.loads(segment["audio_tts_options_json"])["speed_level"] == "fast"
 
 
+def test_global_tts_changes_only_stale_fields_not_overridden_by_segment(
+    temp_db, monkeypatch
+):
+    voice_type = "doubao:zh_female_wanwanxiaohe_moon_bigtts"
+    temp_db.create_task(
+        "segment-speed-override",
+        "文案",
+        "知识科普|电影质感",
+        100,
+        voice_type=voice_type,
+        tts_options={"speed_level": "normal", "volume_ratio": 1.0},
+        execution_mode="review_first",
+    )
+    temp_db.save_segments("segment-speed-override", [{
+        "segment_index": 0,
+        "text": "第一段",
+        "audio_path": "existing.wav",
+        "audio_status": "completed",
+        "audio_tts_options_json": json.dumps({
+            "speed_level": "slow",
+            "_segment_override": True,
+        }),
+    }])
+    monkeypatch.setattr(routes, "mysql_client", temp_db)
+    monkeypatch.setattr(
+        routes.task_manager, "invalidate_task_cache", lambda _task_id: None
+    )
+
+    asyncio.run(routes.update_task_workspace_settings(
+        "segment-speed-override",
+        {
+            "tts_options": {"speed_level": "normal", "volume_ratio": 1.2},
+            "expected_plan_version": 0,
+        },
+    ))
+    assert temp_db.get_segments("segment-speed-override")[0]["audio_status"] == "stale"
+
+    temp_db.update_segment(
+        "segment-speed-override", 0, {"audio_status": "completed"}
+    )
+    asyncio.run(routes.update_task_workspace_settings(
+        "segment-speed-override",
+        {
+            "tts_options": {"speed_level": "fast", "volume_ratio": 1.2},
+            "expected_plan_version": 1,
+        },
+    ))
+    segment = temp_db.get_segments("segment-speed-override")[0]
+    assert segment["audio_status"] == "completed"
+    assert json.loads(segment["audio_tts_options_json"])["speed_level"] == "slow"
+
+
 def test_regenerate_audio_request_keeps_query_compatibility_shape():
     body = RegenerateAudioRequest(
         voice_type="mimo:茉莉",

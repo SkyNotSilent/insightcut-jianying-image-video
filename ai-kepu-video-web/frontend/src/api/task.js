@@ -25,11 +25,12 @@ export function updateVoiceAvailability(voiceKeys) {
   })
 }
 
-export function previewVoice(data) {
+export function previewVoice(data, { silent = false } = {}) {
   return request({
     url: '/ai/native/video/kepu/voices/preview',
     method: 'post',
     data,
+    suppressToast: silent,
     timeout: 120000
   })
 }

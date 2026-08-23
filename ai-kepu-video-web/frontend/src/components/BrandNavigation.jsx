@@ -1,25 +1,17 @@
 import { Download, FileText, FolderKanban, LayoutDashboard, LayoutTemplate, Settings } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { NavLink, useLocation } from 'react-router'
+import { PROJECT_SELECTION_EVENT, projectIdFromPath, readSelectedProject } from '../lib/projectSelection'
 
 const BRAND_MESSAGES = ['AI 视频工作台', '文稿变成视频', '自由二次编辑', '导入剪映草稿']
 
-function readLastWorkspace() {
-  try {
-    const value = JSON.parse(localStorage.getItem('insightcut:last-workspace') || 'null')
-    return value?.taskId ? value : null
-  } catch {
-    return null
-  }
-}
-
 export function BrandNavigation() {
   const location = useLocation()
-  const [lastWorkspace, setLastWorkspace] = useState(readLastWorkspace)
+  const [selectedProject, setSelectedProject] = useState(readSelectedProject)
   const [messageIndex, setMessageIndex] = useState(0)
   const workspaceMatch = location.pathname.match(/^\/workspace\/([^/]+)/)
-  const exportMatch = location.pathname.match(/^\/export\/([^/]+)/)
-  const activeTaskId = workspaceMatch?.[1] || exportMatch?.[1] || lastWorkspace?.taskId
+  const routeTaskId = projectIdFromPath(location.pathname)
+  const activeTaskId = routeTaskId || selectedProject?.taskId
 
   const navigationItems = useMemo(() => [
     { to: '/manuscript', label: '文稿', icon: FileText },
@@ -31,13 +23,15 @@ export function BrandNavigation() {
   ], [activeTaskId, workspaceMatch])
 
   useEffect(() => {
-    const refresh = () => setLastWorkspace(readLastWorkspace())
+    const refresh = () => setSelectedProject(readSelectedProject())
     window.addEventListener('storage', refresh)
     window.addEventListener('insightcut:workspace', refresh)
+    window.addEventListener(PROJECT_SELECTION_EVENT, refresh)
     refresh()
     return () => {
       window.removeEventListener('storage', refresh)
       window.removeEventListener('insightcut:workspace', refresh)
+      window.removeEventListener(PROJECT_SELECTION_EVENT, refresh)
     }
   }, [location.pathname])
 

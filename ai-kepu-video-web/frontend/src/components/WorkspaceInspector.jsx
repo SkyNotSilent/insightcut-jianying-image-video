@@ -9,6 +9,8 @@ import {
   LoaderCircle,
   PanelRightClose,
   PanelRightOpen,
+  Pause,
+  Play,
   Save,
   Settings2,
   Subtitles,
@@ -18,6 +20,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { createProductionTemplate, getAssetLibrary, listProductionTemplates, selectSegmentAsset } from '../api/task'
+import { SPEED_LEVEL_OPTIONS, doubaoSpeedRatio, resolveSegmentVoiceSettings } from '../lib/voiceCatalog'
 import { secondsToLabel, segmentDuration } from '../pages/previewUtils'
 import { VoicePicker } from './VoicePicker'
 import { SegmentFailureList } from './SegmentFailureList'
@@ -60,6 +63,7 @@ export function WorkspaceInspector({
   onVoiceChange,
   onTtsOptionsChange,
   onVoicePreview,
+  onStopVoicePreview,
   voicePreviewState,
   onConfirmVoice,
   voiceReady,
@@ -72,6 +76,7 @@ export function WorkspaceInspector({
   onSaveRuntime,
   onOpenApi,
   onAssetSelected,
+  pendingEdits = false,
 }) {
   const [activeTab, setActiveTab] = useState(open ? 'settings' : 'segment')
   const [assetKind, setAssetKind] = useState('image')
@@ -80,6 +85,16 @@ export function WorkspaceInspector({
   const [libraryError, setLibraryError] = useState('')
   const [templates, setTemplates] = useState([])
   const [templateChoice, setTemplateChoice] = useState('')
+  const segmentVoiceSettings = useMemo(
+    () => resolveSegmentVoiceSettings(currentSegment || {}, workspace || {}),
+    [currentSegment, workspace?.tts_options, workspace?.voice_type],
+  )
+  const segmentVoice = voices.find(voice => voice.id === segmentVoiceSettings.voiceType)
+  const segmentSpeedName = SPEED_LEVEL_OPTIONS.find(([key]) => key === segmentVoiceSettings.effectiveOptions.speed_level)?.[1] || '正常'
+  const segmentSpeedRatio = segmentVoiceSettings.provider === 'doubao'
+    ? `${doubaoSpeedRatio(segmentVoiceSettings.effectiveOptions.speed_level)}x`
+    : ''
+  const segmentPreviewing = voicePreviewState.playingVoice === segmentVoiceSettings.voiceType
 
   useEffect(() => {
     if (open && activeTab === 'segment') setActiveTab('settings')
@@ -140,7 +155,7 @@ export function WorkspaceInspector({
       if (detail?.code !== 'audio_text_mismatch' || !window.confirm(`${detail.message}\n\n确认后仍可使用，但工作台会持续标记文案可能不一致。`)) return
       await selectSegmentAsset(taskId, currentSegment.segment_index, { ...request, confirm_text_mismatch: true })
     }
-    onAssetSelected?.()
+    onAssetSelected?.({ assetType: assetKind, version })
     const result = await getAssetLibrary(taskId, activeTab === 'versions'
       ? { asset_type: assetKind, scope: 'segment', segment_index: currentSegment.segment_index, page_size: 60 }
       : { asset_type: assetKind, scope: 'project', page_size: 100 })
@@ -205,14 +220,19 @@ export function WorkspaceInspector({
         <label className="workspace-inspector-field"><span>生图提示词 {currentSegment.prompt_manual ? <em>手工编辑</em> : null}</span>{currentSegment.prompt_status === 'completed' ? <textarea value={currentSegment.image_prompt} readOnly={!editable} onChange={event => onSegmentChange(currentSegment.segment_index, { image_prompt: event.target.value })} /> : <div className="workspace-prompt-skeleton"><i /><i /><i /></div>}</label>
         {currentSegment.prompt_needs_review ? <p className="workspace-inline-warning"><AlertTriangle size={14} />文案已变化，请检查提示词。</p> : null}
         <SegmentFailureList segment={currentSegment} busy={busyAction === `prompt:${currentSegment.segment_index}`} onRetryPrompt={() => onRegeneratePrompt(currentSegment)} />
-        <section className="workspace-inspector-section"><div className="workspace-setting-heading"><strong>分镜音色</strong><span>留空时跟随全片音色</span></div><select value={currentSegment.audio_voice_type || ''} disabled={!editable} onChange={event => onSegmentChange(currentSegment.segment_index, { audio_voice_type: event.target.value })}><option value="">跟随全片 · {voices.find(voice => voice.id === workspace.voice_type)?.name || '尚未确认'}</option>{voices.filter(voice => voice.selectable && voice.id !== workspace.voice_type).map(voice => <option key={voice.id} value={voice.id}>{voice.name}</option>)}</select></section>
+        <section className="workspace-inspector-section workspace-segment-voice-settings">
+          <div className="workspace-setting-heading"><strong>分镜配音</strong><span>音色和语速都可单独覆盖；留空时跟随全片</span></div>
+          <label><span>音色</span><select value={currentSegment.audio_voice_type || ''} disabled={!editable} onChange={event => { onStopVoicePreview?.(); onSegmentChange(currentSegment.segment_index, { audio_voice_type: event.target.value }) }}><option value="">跟随全片 · {voices.find(voice => voice.id === workspace.voice_type)?.name || '尚未确认'}</option>{voices.filter(voice => voice.selectable && voice.id !== workspace.voice_type).map(voice => <option key={voice.id} value={voice.id}>{voice.name}</option>)}</select></label>
+          <label><span>语速</span><select aria-label="当前分镜语速" value={segmentVoiceSettings.speedOverride} disabled={!editable} onChange={event => { onStopVoicePreview?.(); onSegmentChange(currentSegment.segment_index, { audio_tts_options: event.target.value ? { ...segmentVoiceSettings.override, speed_level: event.target.value } : {} }) }}><option value="">跟随全片 · {segmentSpeedName}{segmentSpeedRatio ? ` · ${segmentSpeedRatio}` : ''}</option>{SPEED_LEVEL_OPTIONS.map(([key, label]) => <option value={key} key={key}>{label}{segmentVoiceSettings.provider === 'doubao' ? ` · ${doubaoSpeedRatio(key)}x` : ''}</option>)}</select></label>
+          <div className="workspace-segment-voice-summary"><span>{segmentVoiceSettings.speedOverride ? '本段覆盖' : '跟随全片'} · {segmentVoice?.name || '未选择音色'} · {segmentSpeedName}{segmentSpeedRatio ? ` ${segmentSpeedRatio}` : ''}</span><button type="button" disabled={!segmentVoice || (voicePreviewState.loading && !segmentPreviewing)} onClick={() => onVoicePreview(segmentVoice, segmentVoiceSettings.effectiveOptions)}>{segmentPreviewing && voicePreviewState.loading ? <LoaderCircle className="spin" size={13} /> : segmentPreviewing ? <Pause size={13} /> : <Play size={13} />}{segmentPreviewing ? '停止' : '试听当前设置'}</button></div>
+        </section>
         <div className="workspace-asset-states"><span className={`is-${currentSegment.image_status}`}>图片 · {assetStatusLabel(currentSegment.image_status)}</span><span className={`is-${currentSegment.audio_status}`}>配音 · {assetStatusLabel(currentSegment.audio_status)}</span></div>
         <div className="workspace-inspector-media-actions" aria-label="当前分镜素材操作">
           <button type="button" disabled={!imageUrl} onClick={onOpenImage}><Eye size={14} />查看画面</button>
           <button type="button" disabled={!editable || Boolean(busyAction)} onClick={onUploadImage}><Upload size={14} />上传替换</button>
           <button type="button" disabled={Boolean(busyAction)} onClick={() => changeTab('versions')}><History size={14} />素材版本</button>
         </div>
-        <div className="workspace-inspector-actions"><Tooltip label={currentSegment.image_prompt ? '只处理当前分镜图片，不会重新生成其他素材' : '请先重新生成这一段的提示词'}><button type="button" disabled={!editable || !currentSegment.image_prompt || currentSegment.prompt_status !== 'completed' || busyAction === `image:${currentSegment.segment_index}`} onClick={() => onRegenerate(currentSegment, 'image')}>{operationTarget(currentSegment, 'image') || busyAction === `image:${currentSegment.segment_index}` ? <LoaderCircle className="spin" size={14} /> : <WandSparkles size={14} />}{currentSegment.image_status === 'completed' ? '重新生成图片' : currentSegment.image_status === 'stale' ? '更新此图' : '重试图片'}</button></Tooltip><Tooltip label="只处理当前分镜配音，不会重新生成其他素材"><button type="button" disabled={!editable || busyAction === `audio:${currentSegment.segment_index}`} onClick={() => onRegenerate(currentSegment, 'audio')}>{operationTarget(currentSegment, 'audio') || busyAction === `audio:${currentSegment.segment_index}` ? <LoaderCircle className="spin" size={14} /> : <Volume2 size={14} />}{currentSegment.audio_status === 'completed' ? '重新生成配音' : currentSegment.audio_status === 'stale' ? '更新配音' : '重试配音'}</button></Tooltip></div>
+        <div className="workspace-inspector-actions"><Tooltip label={pendingEdits ? '请等待当前修改保存完成' : currentSegment.image_prompt ? '只处理当前分镜图片，不会重新生成其他素材' : '请先重新生成这一段的提示词'}><button type="button" disabled={!editable || pendingEdits || !currentSegment.image_prompt || currentSegment.prompt_status !== 'completed' || busyAction === `image:${currentSegment.segment_index}`} onClick={() => onRegenerate(currentSegment, 'image')}>{operationTarget(currentSegment, 'image') || busyAction === `image:${currentSegment.segment_index}` ? <LoaderCircle className="spin" size={14} /> : <WandSparkles size={14} />}{currentSegment.image_status === 'completed' ? '重新生成图片' : currentSegment.image_status === 'stale' ? '更新此图' : '重试图片'}</button></Tooltip><Tooltip label={pendingEdits ? '请等待音色或语速保存完成' : '只处理当前分镜配音，不会重新生成其他素材'}><button type="button" disabled={!editable || pendingEdits || busyAction === `audio:${currentSegment.segment_index}`} onClick={() => onRegenerate(currentSegment, 'audio')}>{operationTarget(currentSegment, 'audio') || busyAction === `audio:${currentSegment.segment_index}` ? <LoaderCircle className="spin" size={14} /> : <Volume2 size={14} />}{currentSegment.audio_status === 'completed' ? '重新生成配音' : currentSegment.audio_status === 'stale' ? '更新配音' : '重试配音'}</button></Tooltip></div>
         {storageWarning ? <p className="workspace-inspector-storage-warning" role="status"><AlertTriangle size={14} /><span>素材仍可使用，但本地归档尚未完成。</span></p> : null}
       </> : <div className="workspace-inspector-skeleton"><i /><i /><i /><i /><i /></div>}
     </div> : ['versions', 'project'].includes(activeTab) ? <div className="workspace-asset-library-panel" role="tabpanel" aria-labelledby={`workspace-${activeTab}-tab`}>
@@ -242,7 +262,7 @@ export function WorkspaceInspector({
       <header><div><span>全片设置</span><h2>画面与配音</h2></div><button type="button" aria-label="收起设置" onClick={onClose}><PanelRightClose size={18} /></button></header>
       <section className="workspace-setting-section workspace-template-apply"><div className="workspace-setting-heading"><strong>生产模板</strong><span>应用前会展示真实影响范围，不会自动重新生成</span></div><div><select value={templateChoice} onChange={event => setTemplateChoice(event.target.value)}><option value="">选择已保存模板</option>{templates.map(template => <option key={template.template_id} value={template.template_id}>{template.name}{template.is_default ? ' · 默认' : ''}</option>)}</select><button type="button" className="button button-secondary" disabled={!templateChoice || busyAction === 'settings'} onClick={applyTemplate}>应用</button></div></section>
       <section className="workspace-setting-section"><div className="workspace-setting-heading"><strong>配音音色</strong><span>试听与最终配音使用同一组语速参数</span></div><VoicePicker voices={voices} value={selectedVoice} ttsOptions={ttsOptions} onChange={onVoiceChange} onOptionsChange={onTtsOptionsChange} onPreview={onVoicePreview} playingVoice={voicePreviewState.playingVoice} previewLoading={voicePreviewState.loading} previewError={voicePreviewState.error} disabled={!editable} compact /></section>
-      <button type="button" className="button button-primary workspace-confirm-voice" disabled={!selectedVoice || busyAction === 'settings' || !editable} onClick={onConfirmVoice}>{busyAction === 'settings' ? '正在保存…' : !editable ? '预案生成完成后确认音色' : voiceReady ? '更新全片音色' : '确认音色并返回预案'}</button>
+      <button type="button" className="button button-primary workspace-confirm-voice" disabled={!selectedVoice || Boolean(busyAction) || !editable} onClick={onConfirmVoice}>{busyAction ? '正在验证并保存…' : !editable ? '预案生成完成后确认音色' : voiceReady ? '更新全片音色' : '确认音色并返回预案'}</button>
       <section className="workspace-setting-section"><div className="workspace-setting-heading"><strong>画面风格</strong><span>保存后由你确认是否重新生成系统提示词</span></div><div className="workspace-style-grid">{visualStyles.map(style => <VisualStyleCard key={style.value} style={style} disabled={!editable} selected={workspace.visual_style === style.value} onSelect={value => onSaveSettings({ visual_style: value, voice_confirmed: voiceReady })} />)}</div></section>
       <section className="workspace-setting-section"><div className="workspace-setting-heading"><strong>视频比例</strong><span>已有图片会标记为待更新</span></div><div className="workspace-ratio-control">{ratioOptions.map(ratio => <button type="button" key={ratio} disabled={!editable} className={workspace.ratio === ratio ? 'is-selected' : ''} onClick={() => onSaveSettings({ ratio, voice_confirmed: voiceReady })}>{ratio}</button>)}</div></section>
       <section className="workspace-setting-section"><div className="workspace-setting-heading"><strong>字幕基础设置</strong><span>即时预览、完整视频和剪映草稿共用这一份任务快照</span></div><div className="workspace-subtitle-options"><label><span>字号</span><select value={workspace.subtitle_options?.size || 'standard'} onChange={event => onSaveSettings({ subtitle_options: { ...(workspace.subtitle_options || {}), size: event.target.value }, voice_confirmed: voiceReady })}><option value="small">小</option><option value="standard">标准</option><option value="large">大</option></select></label><label><span>垂直位置</span><select value={workspace.subtitle_options?.position || 'standard'} onChange={event => onSaveSettings({ subtitle_options: { ...(workspace.subtitle_options || {}), position: event.target.value }, voice_confirmed: voiceReady })}><option value="low">偏低</option><option value="standard">标准</option><option value="high">偏高</option></select></label><label><span>描边</span><select value={workspace.subtitle_options?.outline || 'standard'} onChange={event => onSaveSettings({ subtitle_options: { ...(workspace.subtitle_options || {}), outline: event.target.value }, voice_confirmed: voiceReady })}><option value="light">轻</option><option value="standard">标准</option><option value="strong">强</option></select></label></div></section>

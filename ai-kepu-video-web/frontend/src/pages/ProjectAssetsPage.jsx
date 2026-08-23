@@ -5,6 +5,7 @@ import { deleteTask, getSegments, listTasks } from '../api/task'
 import { ConfirmDialog } from '../components/Modal'
 import { EmptyState, LoadingState } from '../components/StatusStates'
 import { toast } from '../lib/toast'
+import { clearSelectedProject } from '../lib/projectSelection'
 import { createDraft, deleteDraft, estimateDuration, formatLocalTime, listDrafts, visualStyles } from '../utils/projectDrafts'
 import { normalizeMediaUrl } from '../utils/mediaUrl'
 import { deriveTaskState } from '../utils/taskState'
@@ -226,15 +227,7 @@ export function ProjectAssetsPage() {
     setDeletingId(projectToDelete.id)
     try {
       const result = await deleteTask(projectToDelete.id, { deleteFiles: true })
-      try {
-        const recent = JSON.parse(localStorage.getItem('insightcut:last-workspace') || 'null')
-        if (recent?.taskId === projectToDelete.id) {
-          localStorage.removeItem('insightcut:last-workspace')
-          window.dispatchEvent(new Event('insightcut:workspace'))
-        }
-      } catch {
-        localStorage.removeItem('insightcut:last-workspace')
-      }
+      clearSelectedProject(projectToDelete.id)
       removeTaskFromView(projectToDelete.id)
       setProjectToDelete(null)
       const issueCount = getDeletionIssueCount(result)

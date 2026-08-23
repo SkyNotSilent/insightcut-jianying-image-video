@@ -1,11 +1,18 @@
 const SPEED_LEVEL_ORDER = ['very_slow', 'slow', 'normal', 'fast', 'very_fast']
 const SPEED_LEVELS = new Set(SPEED_LEVEL_ORDER)
+export const SPEED_LEVEL_OPTIONS = [
+  ['very_slow', '很慢'],
+  ['slow', '偏慢'],
+  ['normal', '正常'],
+  ['fast', '偏快'],
+  ['very_fast', '很快'],
+]
 const DOUBAO_SPEED_RATIOS = {
   very_slow: 0.8,
-  slow: 1,
-  normal: 1.25,
-  fast: 1.5,
-  very_fast: 1.75,
+  slow: 0.9,
+  normal: 1,
+  fast: 1.25,
+  very_fast: 1.5,
 }
 
 export function doubaoSpeedRatio(speedLevel) {
@@ -160,6 +167,34 @@ export function buildVoiceTaskPayload(voiceType, options = {}, inherited = {}) {
   return {
     voice_type: id,
     tts_options: mergeTtsOptions(inherited, options, provider),
+  }
+}
+
+export function parseSegmentTtsOptions(segment = {}) {
+  if (segment.audio_tts_options && typeof segment.audio_tts_options === 'object') {
+    return { ...segment.audio_tts_options }
+  }
+  try {
+    const parsed = JSON.parse(segment.audio_tts_options_json || '{}')
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const { _segment_override: ignored, speed_ratio: ignoredRatio, speed_instruction: ignoredInstruction, ...options } = parsed
+    return options
+  } catch {
+    return {}
+  }
+}
+
+export function resolveSegmentVoiceSettings(segment = {}, workspace = {}) {
+  const voiceType = segment.audio_voice_type || workspace.voice_type || ''
+  const provider = voiceType.startsWith('doubao:') ? 'doubao' : 'mimo'
+  const override = parseSegmentTtsOptions(segment)
+  const effectiveOptions = mergeTtsOptions(workspace.tts_options || {}, override, provider)
+  return {
+    voiceType,
+    provider,
+    override,
+    speedOverride: override.speed_level || '',
+    effectiveOptions,
   }
 }
 

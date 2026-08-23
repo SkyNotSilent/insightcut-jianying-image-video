@@ -27,6 +27,7 @@ from src.draft.atomic_finalize import (
     publish_finalize_workspace,
     validate_staged_draft,
 )
+from src.draft.voice_catalog import encode_segment_tts_override, segment_tts_override
 from src.utils.local_uploader import LocalUploader
 from src.utils.rendering import canvas_for_ratio, normalize_ratio
 from src.config import Config
@@ -135,7 +136,26 @@ def _segment_tts_options(segment: Dict) -> Dict:
         value = json.loads(segment.get("audio_tts_options_json") or "{}")
     except (TypeError, ValueError):
         return {}
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    value.pop("_segment_override", None)
+    value.pop("speed_ratio", None)
+    value.pop("speed_instruction", None)
+    return value
+
+
+def _segment_tts_override_options(
+    segment: Dict,
+    task_row: Dict,
+    task_options: Dict,
+) -> Dict:
+    options, _ = segment_tts_override(
+        segment.get("audio_tts_options_json"),
+        segment_voice_type=segment.get("audio_voice_type") or "",
+        task_voice_type=task_row.get("voice_type") or "",
+        task_options=task_options,
+    )
+    return options
 
 
 def _safe_failure(error: BaseException, provider: Optional[str] = None) -> SafeError:
@@ -1133,11 +1153,9 @@ class TaskExecutor:
                 }
 
             options = dict(task_tts_options)
-            if segment.get("audio_tts_options_json"):
-                try:
-                    options.update(json.loads(segment["audio_tts_options_json"]))
-                except (TypeError, ValueError):
-                    pass
+            options.update(
+                _segment_tts_override_options(segment, task_row, task_tts_options)
+            )
             if isinstance(target.get("tts_options"), dict):
                 options.update(target["tts_options"])
             voice = (
@@ -1163,11 +1181,29 @@ class TaskExecutor:
                 url = None
                 warning = _upload_warning(error)
                 logger.warning("[%s] 分镜 %s 配音本地归档失败", task_id, index)
+            stored_voice_candidate = (
+                target.get("voice_type") or segment.get("audio_voice_type") or ""
+            )
+            stored_voice = (
+                stored_voice_candidate
+                if stored_voice_candidate != (task_row.get("voice_type") or "")
+                else ""
+            )
+            stored_options_json = (
+                json.dumps(
+                    encode_segment_tts_override(target["tts_options"]),
+                    ensure_ascii=False,
+                )
+                if isinstance(target.get("tts_options"), dict)
+                else segment.get("audio_tts_options_json") or ""
+            )
             return {
                 "path": path,
                 "url": url,
                 "voice": voice,
                 "options": options,
+                "stored_voice": stored_voice,
+                "stored_options_json": stored_options_json,
                 "warning": warning,
             }
 
@@ -1266,8 +1302,8 @@ class TaskExecutor:
                                 "audio_error": storage_warning.safe_message if storage_warning else None,
                                 "audio_error_code": storage_warning.code.value if storage_warning else None,
                                 "audio_error_meta": storage_warning.metadata() if storage_warning else None,
-                                "audio_voice_type": result["voice"],
-                                "audio_tts_options_json": json.dumps(result["options"], ensure_ascii=False),
+                                "audio_voice_type": result["stored_voice"],
+                                "audio_tts_options_json": result["stored_options_json"],
                             }
                             asset_kwargs = {
                                 "text": segment.get("text"),
@@ -2108,20 +2144,21 @@ class TaskExecutor:
 
             segment_audio_settings = []
             for segment in persisted_segments:
-                segment_voice = segment.get("audio_voice_type") or voice_type
+                segment_voice_override = segment.get("audio_voice_type") or ""
+                segment_voice = segment_voice_override or voice_type
                 segment_options = dict(tts_options)
-                if segment.get("audio_voice_type") and segment.get("audio_tts_options_json"):
-                    try:
-                        parsed_segment_options = json.loads(segment["audio_tts_options_json"])
-                        if isinstance(parsed_segment_options, dict):
-                            segment_options.update(parsed_segment_options)
-                    except (TypeError, ValueError):
-                        logger.warning(
-                            "[%s] 分镜 %s 的配音参数快照无效，改用全片参数",
-                            task_id,
-                            segment.get("segment_index"),
-                        )
-                segment_audio_settings.append((segment_voice, segment_options))
+                segment_options.update(
+                    _segment_tts_override_options(segment, task_row, tts_options)
+                )
+                stored_voice = (
+                    segment_voice_override
+                    if segment_voice_override and segment_voice_override != voice_type
+                    else ""
+                )
+                stored_options_json = segment.get("audio_tts_options_json") or ""
+                segment_audio_settings.append(
+                    (segment_voice, segment_options, stored_voice, stored_options_json)
+                )
 
             def generate_voiceover_item(i: int, seg: str):
                 logger.debug(f"[{task_id}] 配音进度: {i+1}/{segments_count}")
@@ -2130,7 +2167,7 @@ class TaskExecutor:
                         time.sleep(0.5)
                     if cancellation:
                         cancellation.raise_if_cancelled()
-                    segment_voice, segment_options = segment_audio_settings[i]
+                    segment_voice, segment_options, _, _ = segment_audio_settings[i]
                     path = pipeline.voiceover_generator.generate(
                         seg,
                         filename=f"seg_{i:03d}",
@@ -2234,7 +2271,12 @@ class TaskExecutor:
                     prompt = _accepted_image_prompt(path, requested_prompt)
                     voice = None
                 else:
-                    segment_voice, segment_options = segment_audio_settings[i]
+                    (
+                        segment_voice,
+                        segment_options,
+                        stored_voice,
+                        stored_options_json,
+                    ) = segment_audio_settings[i]
                     updates = {
                         "audio_path": path,
                         "audio_url": url,
@@ -2242,12 +2284,8 @@ class TaskExecutor:
                         "audio_error": final_error.safe_message if final_error else None,
                         "audio_error_code": final_error.code.value if final_error else None,
                         "audio_error_meta": final_error.metadata() if final_error else None,
-                        "audio_voice_type": (
-                            segment_voice
-                            if persisted_segments[i].get("audio_voice_type")
-                            else ""
-                        ),
-                        "audio_tts_options_json": json.dumps(segment_options, ensure_ascii=False),
+                        "audio_voice_type": stored_voice,
+                        "audio_tts_options_json": stored_options_json,
                     }
                     label = f"配音 · 分镜 {i + 1}"
                     prompt = None
@@ -2670,7 +2708,12 @@ class TaskExecutor:
                 image_url = None
                 audio_url = None
 
-                segment_voice, segment_options = segment_audio_settings[i]
+                (
+                    segment_voice,
+                    segment_options,
+                    stored_voice,
+                    stored_options_json,
+                ) = segment_audio_settings[i]
                 seg_data = {
                     'segment_index': segment_index,
                     'text': seg_text,
@@ -2683,12 +2726,8 @@ class TaskExecutor:
                     'audio_url': audio_url,
                     'audio_status': audio_status,
                     'audio_error': audio_error,
-                    'audio_voice_type': (
-                        segment_voice
-                        if persisted_segments[i].get('audio_voice_type')
-                        else ''
-                    ),
-                    'audio_tts_options_json': json.dumps(segment_options, ensure_ascii=False),
+                    'audio_voice_type': stored_voice,
+                    'audio_tts_options_json': stored_options_json,
                 }
                 segments_data.append(seg_data)
 

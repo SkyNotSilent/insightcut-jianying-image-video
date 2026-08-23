@@ -120,7 +120,7 @@ def test_routes_doubao_per_call_and_maps_speed_volume(tmp_path, monkeypatch, tts
         "voice_type": "zh_female_shuangkuaisisi_moon_bigtts",
         "encoding": "wav",
         "rate": 24000,
-        "speed_ratio": 1.75,
+        "speed_ratio": 1.5,
         "volume_ratio": 1.8,
     }
 

@@ -4,6 +4,15 @@ import test from 'node:test'
 
 const cssUrl = new URL('../src/pages/workspace-page.css', import.meta.url)
 const css = await readFile(cssUrl, 'utf8')
+const loaderCss = await readFile(new URL('../src/components/ui/BrandLoader.css', import.meta.url), 'utf8')
+const workspaceSource = await readFile(new URL('../src/pages/WorkspacePage.jsx', import.meta.url), 'utf8')
+
+test('workspace loading uses the reusable brand reticle without a generic loading card', () => {
+  assert.match(workspaceSource, /<BrandLoader label="正在恢复生产工作台" \/>/)
+  assert.doesNotMatch(workspaceSource, /workspace-loading-card|workspace-orbit/)
+  assert.match(loaderCss, /\.ui-brand-loader-reticles[^}]*animation:\s*uiBrandLoaderReticles/)
+  assert.match(loaderCss, /@media \(prefers-reduced-motion: reduce\)/)
+})
 const assetCss = await readFile(new URL('../src/components/ui/asset-components.css', import.meta.url), 'utf8')
 const uiCss = await readFile(new URL('../src/components/ui/ui.css', import.meta.url), 'utf8')
 
@@ -30,6 +39,14 @@ test('desktop workspace keeps the fixed three-column editor and independent scro
   assert.match(css, /\.workspace-preview\s*\{[^}]*grid-column:\s*2[^}]*overflow-y:\s*auto/s)
   assert.match(css, /\.workspace-settings,[\s\S]*?grid-column:\s*3[^}]*overflow:\s*hidden/s)
   assert.match(css, /\.workspace-segment-inspector,[\s\S]*?\.workspace-settings-panel\s*\{[^}]*overflow-y:\s*auto/s)
+})
+
+test('desktop stage navigation uses legible two-digit hierarchy', () => {
+  assert.match(workspaceSource, /String\(index \+ 1\)\.padStart\(2, '0'\)/)
+  assert.match(css, /--workspace-guide:\s*100px/)
+  assert.match(css, /\.workspace-stage-navigation li strong\s*\{[^}]*font-size:\s*15px/s)
+  assert.match(css, /\.workspace-stage-navigation li small\s*\{[^}]*font-size:\s*11px/s)
+  assert.match(css, /\.workspace-stage-navigation li > button > span\s*\{[^}]*width:\s*36px[^}]*height:\s*36px/s)
 })
 
 test('mobile panes avoid horizontal overflow and motion has an accessible fallback', () => {
