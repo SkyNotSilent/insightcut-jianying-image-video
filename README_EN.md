@@ -1,5 +1,9 @@
 <div align="center">
-  <img src="docs/assets/insightcut-mark.svg" width="112" alt="InsightCut brand mark" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/insightcut-mark-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/insightcut-mark.svg" />
+    <img src="docs/assets/insightcut-mark.svg" width="112" alt="InsightCut brand mark" />
+  </picture>
   <h1>InsightCut</h1>
   <p><strong>A local-first, editable, and recoverable AI image-video workspace</strong></p>
   <p>Turn a topic or complete manuscript into storyboards, visuals, voiceovers, subtitles, previews, and editable Jianying / CapCut drafts.</p>
@@ -12,6 +16,7 @@
     <img src="https://img.shields.io/badge/Python-3.9-315FEA?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.9" />
     <img src="https://img.shields.io/badge/React-19-315FEA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" />
     <img src="https://img.shields.io/badge/Local--first-SQLite-D46F44?style=flat-square" alt="Local first" />
+    <img src="https://img.shields.io/badge/License-not%20declared-68748B?style=flat-square" alt="No open-source license declared" />
   </p>
   <p>
     <a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>Showcase</strong></a>
@@ -28,9 +33,9 @@ InsightCut is built for explainers, educational videos, knowledge content, opini
 
 <table>
   <tr>
-    <td width="33%"><strong>🎬 Editable after generation</strong><br />Revise one segment, prompt, image, or voiceover without restarting the entire workflow.</td>
-    <td width="33%"><strong>🛟 Resume after failure</strong><br />Completed assets remain available, and recovery retries only missing or failed targets.</td>
-    <td width="33%"><strong>📦 Deliver video and project files</strong><br />Export MP4, per-segment assets, and editable Jianying / CapCut drafts.</td>
+    <td width="33%"><strong>Editable after generation</strong><br />Revise one segment, prompt, image, or voiceover without restarting the entire workflow.</td>
+    <td width="33%"><strong>Resume after failure</strong><br />Completed assets remain available, and recovery retries only missing or failed targets.</td>
+    <td width="33%"><strong>Deliver video and project files</strong><br />Export MP4, per-segment assets, and editable Jianying / CapCut drafts.</td>
   </tr>
 </table>
 

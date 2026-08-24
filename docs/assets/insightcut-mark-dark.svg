@@ -6,23 +6,23 @@
       <stop offset="1" stop-color="#D46F44"/>
     </linearGradient>
     <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(78 75) rotate(90) scale(66)" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#315FEA" stop-opacity="0.13"/>
+      <stop stop-color="#315FEA" stop-opacity="0.28"/>
       <stop offset="1" stop-color="#315FEA" stop-opacity="0"/>
     </radialGradient>
     <filter id="shadow" x="7" y="9" width="146" height="148" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#17306E" flood-opacity="0.16"/>
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#050812" flood-opacity="0.42"/>
     </filter>
   </defs>
-  <rect width="160" height="160" rx="40" fill="#F7F8FC"/>
+  <rect width="160" height="160" rx="40" fill="#0F1522"/>
   <circle cx="80" cy="80" r="68" fill="url(#glow)"/>
   <g filter="url(#shadow)">
-    <rect x="18" y="18" width="124" height="124" rx="31" fill="white"/>
+    <rect x="18" y="18" width="124" height="124" rx="31" fill="#172033"/>
     <rect x="21" y="21" width="118" height="118" rx="28" stroke="url(#frame)" stroke-width="6"/>
   </g>
-  <path d="M49 66V49H66" stroke="#172033" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M94 49H111V66" stroke="#172033" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M111 94V111H94" stroke="#172033" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M66 111H49V94" stroke="#172033" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M49 66V49H66" stroke="#F7F8FC" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M94 49H111V66" stroke="#F7F8FC" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M111 94V111H94" stroke="#F7F8FC" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M66 111H49V94" stroke="#F7F8FC" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
   <circle cx="80" cy="80" r="9" fill="#315FEA"/>
-  <circle cx="80" cy="80" r="4" fill="white"/>
+  <circle cx="80" cy="80" r="4" fill="#F7F8FC"/>
 </svg>

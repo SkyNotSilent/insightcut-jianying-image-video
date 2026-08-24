@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.9"
           cache: "pip"
           cache-dependency-path: ai-kepu-video-server/requirements.txt
       - name: Install backend dependencies
@@ -50,7 +50,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.9"
       - name: Check public repository assets
         run: python scripts/check_readme_assets.py
       - name: Check tracked local-only paths

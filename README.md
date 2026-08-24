@@ -1,5 +1,9 @@
 <div align="center">
-  <img src="docs/assets/insightcut-mark.svg" width="112" alt="InsightCut 品牌图标" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/insightcut-mark-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/insightcut-mark.svg" />
+    <img src="docs/assets/insightcut-mark.svg" width="112" alt="InsightCut 品牌图标" />
+  </picture>
   <h1>InsightCut</h1>
   <p><strong>本地优先、可编辑、可恢复的 AI 图片视频工作台</strong></p>
   <p>从主题或完整文稿出发，完成分镜、画面、配音、字幕、预览与剪映 / CapCut 导出。</p>
@@ -12,6 +16,7 @@
     <img src="https://img.shields.io/badge/Python-3.9-315FEA?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.9" />
     <img src="https://img.shields.io/badge/React-19-315FEA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" />
     <img src="https://img.shields.io/badge/Local--first-SQLite-D46F44?style=flat-square" alt="本地优先" />
+    <img src="https://img.shields.io/badge/License-not%20declared-68748B?style=flat-square" alt="尚未声明开源许可证" />
   </p>
   <p>
     <a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>成片案例</strong></a>
@@ -28,9 +33,9 @@ InsightCut 面向科普、认知、知识解说、观点表达和短视频创作
 
 <table>
   <tr>
-    <td width="33%"><strong>🎬 生成以后还能改</strong><br />逐段修改文字、提示词、图片和配音，不必为一个细节重跑整条链路。</td>
-    <td width="33%"><strong>🛟 失败以后接着做</strong><br />任务中断不会清空已完成内容，只重试缺失或失败的素材。</td>
-    <td width="33%"><strong>📦 成片与工程都交付</strong><br />输出 MP4、分镜素材包，以及可继续精修的剪映 / CapCut 草稿。</td>
+    <td width="33%"><strong>生成以后还能改</strong><br />逐段修改文字、提示词、图片和配音，不必为一个细节重跑整条链路。</td>
+    <td width="33%"><strong>失败以后接着做</strong><br />任务中断不会清空已完成内容，只重试缺失或失败的素材。</td>
+    <td width="33%"><strong>成片与工程都交付</strong><br />输出 MP4、分镜素材包，以及可继续精修的剪映 / CapCut 草稿。</td>
   </tr>
 </table>
 

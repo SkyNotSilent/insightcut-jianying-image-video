@@ -1,25 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
   <defs>
-    <linearGradient id="brandSweep" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#f472b6"/>
-      <stop offset="0.48" stop-color="#2563eb"/>
-      <stop offset="1" stop-color="#818cf8"/>
+    <linearGradient id="frame" x1="9" y1="7" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#315FEA"/>
+      <stop offset="0.56" stop-color="#6078E0"/>
+      <stop offset="1" stop-color="#D46F44"/>
     </linearGradient>
-    <filter id="softGlow" x="-24" y="-24" width="112" height="112" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#2563eb" flood-opacity="0.35"/>
-    </filter>
   </defs>
-  <rect width="64" height="64" rx="16" fill="#f7f8fa"/>
-  <rect x="3" y="3" width="58" height="58" rx="13" stroke="url(#brandSweep)" stroke-width="4" filter="url(#softGlow)"/>
-  <rect x="7" y="7" width="50" height="50" rx="10" fill="#ffffff"/>
-  <g transform-origin="32 32">
-    <animateTransform attributeName="transform" type="rotate" values="0 32 32;90 32 32;180 32 32;270 32 32;360 32 32" dur="5s" repeatCount="indefinite"/>
-    <path d="M18 25v-7h7" stroke="#1d2129" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M39 18h7v7" stroke="#1d2129" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M46 39v7h-7" stroke="#1d2129" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M25 46h-7v-7" stroke="#1d2129" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-  </g>
-  <circle cx="32" cy="32" r="3.5" fill="#2563eb" filter="url(#softGlow)">
-    <animate attributeName="r" values="3.5;4.8;3.5" dur="2.5s" repeatCount="indefinite"/>
-  </circle>
+  <rect width="64" height="64" rx="16" fill="#F7F8FC"/>
+  <rect x="5" y="5" width="54" height="54" rx="14" fill="white"/>
+  <rect x="6.5" y="6.5" width="51" height="51" rx="12.5" stroke="url(#frame)" stroke-width="3"/>
+  <path d="M18 26V18H26" stroke="#172033" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M38 18H46V26" stroke="#172033" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M46 38V46H38" stroke="#172033" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M26 46H18V38" stroke="#172033" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="32" cy="32" r="4" fill="#315FEA"/>
+  <circle cx="32" cy="32" r="1.75" fill="white"/>
 </svg>
