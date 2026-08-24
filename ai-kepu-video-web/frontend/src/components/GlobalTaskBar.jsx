@@ -112,13 +112,11 @@ export function GlobalTaskBar() {
       <ChevronDown size={15} aria-hidden="true" />
     </button>
     {expanded ? <div className="global-task-drawer">
-      <div className="global-task-drawer-heading">
-        <div><strong>任务活动</strong><span>项目切换不会中断后台生成</span></div>
-        <button type="button" className="icon-button" onClick={() => setExpanded(false)} aria-label="收起任务活动"><X size={16} /></button>
-      </div>
+      <strong className="global-task-drawer-label">任务</strong>
       {visibleTasks.length ? <div className="global-task-track">
         {visibleTasks.map(task => <TaskCard key={task.task_id} task={task} selected={task.task_id === selectedProject?.taskId} onOpen={handleOpen} onCancel={handleCancel} />)}
       </div> : <div className="global-task-empty">暂无运行或待处理任务。可以从文稿页开始一个新项目。</div>}
+      <button type="button" className="icon-button global-task-drawer-close" onClick={() => setExpanded(false)} aria-label="收起任务活动"><X size={15} /></button>
     </div> : null}
   </section>
 }
