@@ -61,9 +61,7 @@ InsightCut 面向科普、认知、知识解说、观点表达和短视频创作
 
 模型从这 14 个字扩写完整文稿，再生成分镜、画面提示词、图片、配音、字幕和成片。没有为案例额外补写脚本。
 
-[![播放《我是谁？我在哪？我要去何方？》](docs/showcase/thumbs/who-am-i-16x9.jpg)](https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/#who-am-i-16x9)
-
-[▶ 在在线展厅直接播放](https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/#who-am-i-16x9)
+https://github.com/user-attachments/assets/3c8061af-0100-453c-af08-614a55dd24f0
 
 ### 小岛经济学
 

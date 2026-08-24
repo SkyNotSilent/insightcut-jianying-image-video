@@ -18,3 +18,9 @@ test('task selection becomes the shared workspace and export context', () => {
   assert.match(component, /当前项目/)
   assert.match(component, /task-current-context/)
 })
+
+test('the global task capsule points forward to project activity', () => {
+  assert.match(component, /ChevronRight/)
+  assert.match(component, /<ChevronRight size=\{15\} aria-hidden="true" \/>/)
+  assert.doesNotMatch(component, /ChevronDown/)
+})

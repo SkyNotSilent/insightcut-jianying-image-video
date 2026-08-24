@@ -61,9 +61,7 @@ Every example below was produced from a real local InsightCut task. The underlyi
 
 InsightCut expanded those 14 Chinese characters into the manuscript, storyboard, prompts, images, voiceover, subtitles, and final video. No extra script was written for the showcase.
 
-[![Play Who Am I? Where Am I? Where Am I Going?](docs/showcase/thumbs/who-am-i-16x9.jpg)](https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/#who-am-i-16x9)
-
-[▶ Play it in the online showcase](https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/#who-am-i-16x9)
+https://github.com/user-attachments/assets/3c8061af-0100-453c-af08-614a55dd24f0
 
 ### Island Economics
 

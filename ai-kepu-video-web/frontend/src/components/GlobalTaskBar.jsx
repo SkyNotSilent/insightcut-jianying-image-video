@@ -1,4 +1,4 @@
-import { Check, ChevronDown, CircleAlert, LoaderCircle, MoreHorizontal, X } from 'lucide-react'
+import { Check, ChevronRight, CircleAlert, LoaderCircle, MoreHorizontal, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
@@ -109,7 +109,7 @@ export function GlobalTaskBar() {
       <strong>运行 {activity.counts?.running || 0} 项</strong>
       <span>待处理 {activity.counts?.attention || 0} 项</span>
       {selectedProject ? <span className="task-current-context"><em>当前</em>{selectedProject.name || `项目 ${selectedProject.taskId.slice(0, 6)}`}</span> : <small>未选择项目</small>}
-      <ChevronDown size={15} aria-hidden="true" />
+      <ChevronRight size={15} aria-hidden="true" />
     </button>
     {expanded ? <div className="global-task-drawer">
       <strong className="global-task-drawer-label">任务</strong>
