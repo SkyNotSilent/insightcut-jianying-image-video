@@ -80,15 +80,7 @@ def gen_pop(duration_s=0.25):
     print("生成 pop.wav")
 
 
-# ── 4. 静音占位（当不需要音效时用，避免轨道空洞报错）──────────────────────
-def gen_silence(duration_s=30):
-    n = int(RATE * duration_s)
-    buf = [sample(0)] * n
-    write_wav(OUT / "silence.wav", buf)
-    print("生成 silence.wav")
-
-
-# ── 5. 胶片快门声（图片切换用，~120ms）──────────────────────────────────────
+# ── 4. 胶片快门声（图片切换用，~120ms）──────────────────────────────────────
 def gen_click(duration_s=0.12):
     """
     模拟胶片相机快门：
@@ -126,6 +118,5 @@ if __name__ == "__main__":
     gen_typewriter(30)
     gen_swoosh()
     gen_pop()
-    gen_silence(30)
     gen_click()
     print("所有音效生成完毕")
