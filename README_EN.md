@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="design-qa-artifacts/insightcut-mark.svg" width="112" alt="InsightCut brand mark" />
+  <img src="docs/assets/insightcut-mark.svg" width="112" alt="InsightCut brand mark" />
   <h1>InsightCut</h1>
   <p><strong>A local-first, editable, and recoverable AI image-video workspace</strong></p>
   <p>Turn a topic or complete manuscript into storyboards, visuals, voiceovers, subtitles, previews, and editable Jianying / CapCut drafts.</p>
@@ -40,7 +40,7 @@ InsightCut is built for explainers, educational videos, knowledge content, opini
 
 Start from a short topic or paste a complete manuscript. Confirm the project name, aspect ratio, visual style, and writing style before generation. Topic mode expands the input into a full manuscript for review, while script mode preserves the supplied text.
 
-![InsightCut manuscript editor and creation settings](design-qa-artifacts/readme-home.png)
+![InsightCut manuscript editor and creation settings](docs/screenshots/manuscript.png)
 
 ## Real output
 
@@ -104,7 +104,7 @@ https://github.com/user-attachments/assets/e4695fbc-2339-4102-b631-bcf61df63264
 
 ### Production workspace
 
-![InsightCut production workspace with storyboard navigation, preview, and asset versions](design-qa-artifacts/readme-workspace.png)
+![InsightCut production workspace with storyboard navigation, preview, and asset versions](docs/screenshots/workspace.png)
 
 The spatial workspace keeps all six production stages visible. Browse segments on the left, preview the current scene in the center, and manage segment settings, immutable asset versions, project media, and full-video settings on the right.
 
@@ -112,7 +112,7 @@ Regeneration and uploads append new versions instead of overwriting old files. E
 
 ### Project library
 
-![InsightCut project library with filters, status, and generated covers](design-qa-artifacts/readme-assets.png)
+![InsightCut project library with filters, status, and generated covers](docs/screenshots/assets.png)
 
 The project library brings together drafts, running jobs, resumable projects, completed work, and recoverable failures. Filter by status, visual style, or duration, then return directly to preview, recovery, or export.
 
@@ -288,10 +288,12 @@ insightcut-jianying-image-video/
 │   ├── data/                      # local database, media, and config (untracked)
 │   └── output/                    # new generated tasks (untracked)
 ├── ai-kepu-video-web/frontend/    # React 19 + Vite frontend
-├── assets/                        # built-in visual style previews
-├── design-qa-artifacts/           # current product and README screenshots
-├── docs/                          # product, design, and engineering docs
-└── scripts/                       # local QA and maintenance tools
+├── docs/
+│   ├── assets/                    # README brand assets
+│   ├── screenshots/               # current product screenshots
+│   ├── showcase/                  # playable videos from real projects
+│   └── prd/                       # approved product requirements
+└── scripts/                       # repository checks and maintenance tools
 ~~~
 
 ## Tests and builds
@@ -336,9 +338,8 @@ Media is served through <code>/media/{file_path}</code>, searching <code>output/
 
 ## More documentation
 
-- [Redesign PRD](docs/insightcut-redesign-prd.md)
-- [Functional audit](docs/insightcut-functional-audit.md)
-- [Design QA](design-qa.md)
+- [On-demand preview and final-video export PRD](docs/prd/2026-08-16-on-demand-video-preview-and-export.md)
+- [Storyboard asset-package export PRD](docs/prd/2026-08-16-storyboard-asset-package-export.md)
 - [Engineering workflow](docs/engineering-workflow.md)
 - [Repository hygiene](docs/repo-hygiene.md)
 - [GitHub settings](docs/github-settings.md)

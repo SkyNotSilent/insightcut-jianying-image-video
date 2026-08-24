@@ -10,8 +10,7 @@ InsightCut 的 FastAPI 后端生成服务，负责把主题或长文案转换为
   -> 分段并生成每段画面 prompt
   -> 并行生成 TTS 配音和 AI 图片
   -> 构建剪映/CapCut 草稿
-  -> 导出 MP4 成片
-  -> 可选上传对象存储
+  -> 按需导出 MP4 成片或分镜素材包
 ```
 
 ## 能力边界
@@ -41,7 +40,7 @@ API 文档：`http://localhost:2002/docs`
 
 ### `.env`
 
-`.env.example` 是占位模板。复制为 `.env` 后，填写自己的模型、TTS 和对象存储配置。
+`.env.example` 是占位模板。复制为 `.env` 后，填写自己的模型和 TTS 配置。
 
 ### 前端模型配置
 
@@ -93,10 +92,9 @@ make test-all
 
 ### 测试结果
 
-当前测试状态：**9/9 项目通过，成功率 100%**
+测试结果以当前命令输出为准，不在仓库中保存一次性的本地项目通过率报告。
 
 详细文档：
-- `tests/SUMMARY.md` - 完整测试方案总结
 - `tests/USAGE.md` - 快速使用指南
 - `tests/README.md` - 详细测试文档
 
@@ -109,5 +107,3 @@ make test-all
 **图像接口报错**：检查“模型配置”页或 `.env` 中的图像 API URL、Key、Model 和尺寸参数。
 
 **TTS 失败**：检查 TTS App ID、Token、Cluster 和 Voice Type 是否匹配当前账号套餐。
-
-**对象存储上传失败**：对象存储是可选能力，本地生成不依赖它；需要上传时再配置对应凭证。

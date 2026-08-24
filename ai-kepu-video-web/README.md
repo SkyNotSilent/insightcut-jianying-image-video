@@ -1,13 +1,5 @@
 # InsightCut Web
 
-InsightCut 的 Vue 前端工作台。
+InsightCut 的 Web 工作台位于 [`frontend/`](frontend/) 目录，使用 React 19、React Router 7 和 Vite 4。
 
-主要负责：
-
-- 创建认知/科普/心理学等解释型视频任务
-- 配置创作风格、画面风格、配音和脚本长度
-- 查看任务进度和历史资产
-- 预览、编辑分段内容，并导出剪映草稿或 MP4
-- 管理本地模型接口配置
-
-开发入口在 `frontend/` 目录。
+本地开发、测试、构建、主要路由和导出语义请参阅 [`frontend/README.md`](frontend/README.md)。

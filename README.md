@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="design-qa-artifacts/insightcut-mark.svg" width="112" alt="InsightCut 品牌图标" />
+  <img src="docs/assets/insightcut-mark.svg" width="112" alt="InsightCut 品牌图标" />
   <h1>InsightCut</h1>
   <p><strong>本地优先、可编辑、可恢复的 AI 图片视频工作台</strong></p>
   <p>从主题或完整文稿出发，完成分镜、画面、配音、字幕、预览与剪映 / CapCut 导出。</p>
@@ -40,7 +40,7 @@ InsightCut 面向科普、认知、知识解说、观点表达和短视频创作
 
 在同一页面输入一句主题或完整文稿，并在生成前集中确认项目名称、画面比例、视觉风格与文案风格。主题模式会先扩写完整文稿并交给你确认；脚本模式严格保留原文。
 
-![InsightCut 新版文稿工作台真实界面](design-qa-artifacts/readme-home.png)
+![InsightCut 新版文稿工作台真实界面](docs/screenshots/manuscript.png)
 
 ## 真实成片案例
 
@@ -104,7 +104,7 @@ https://github.com/user-attachments/assets/e4695fbc-2339-4102-b631-bcf61df63264
 
 ### 生产工作台
 
-![InsightCut 新版分镜生产工作台与素材版本界面](design-qa-artifacts/readme-workspace.png)
+![InsightCut 新版分镜生产工作台与素材版本界面](docs/screenshots/workspace.png)
 
 白色空间化工作台保留真实的 01–06 生产阶段：左侧浏览分镜，中间完成即时预览，右侧处理当前分镜、素材版本、项目素材和全片设置。
 
@@ -112,7 +112,7 @@ https://github.com/user-attachments/assets/e4695fbc-2339-4102-b631-bcf61df63264
 
 ### 项目资产库
 
-![InsightCut 项目资产库：项目筛选、状态与真实画面封面](design-qa-artifacts/readme-assets.png)
+![InsightCut 项目资产库：项目筛选、状态与真实画面封面](docs/screenshots/assets.png)
 
 项目资产库集中展示草稿、生成中、可继续、已完成和失败可恢复的项目，并支持按状态、画面风格和时长筛选。项目卡片使用真实生成画面作为封面，可以直接回到对应项目继续预览、修复或导出。
 
@@ -319,10 +319,12 @@ insightcut-jianying-image-video/
 │   ├── data/                      # 本地 SQLite、媒体和配置（不提交）
 │   └── output/                    # 新任务生成结果（不提交）
 ├── ai-kepu-video-web/frontend/    # React 19 + Vite 前端
-├── assets/                        # 内置视觉风格预览
-├── design-qa-artifacts/           # 当前产品界面截图
-├── docs/                          # 产品、设计和工程文档
-└── scripts/                       # 本地 QA 工具
+├── docs/
+│   ├── assets/                    # README 品牌资源
+│   ├── screenshots/               # 当前产品界面截图
+│   ├── showcase/                  # 可在线播放的真实成片案例
+│   └── prd/                       # 已确认的产品需求文档
+└── scripts/                       # 仓库检查和维护工具
 ```
 
 ## 测试与构建
@@ -365,9 +367,8 @@ python scripts/maintenance_report.py --dry-run
 
 ## 更多文档
 
-- [产品重构 PRD](docs/insightcut-redesign-prd.md)
-- [功能审计](docs/insightcut-functional-audit.md)
-- [设计 QA 记录](design-qa.md)
+- [按需预览与成片导出 PRD](docs/prd/2026-08-16-on-demand-video-preview-and-export.md)
+- [分镜素材包导出 PRD](docs/prd/2026-08-16-storyboard-asset-package-export.md)
 - [工程协作流程](docs/engineering-workflow.md)
 - [仓库维护约定](docs/repo-hygiene.md)
 - [GitHub 设置](docs/github-settings.md)

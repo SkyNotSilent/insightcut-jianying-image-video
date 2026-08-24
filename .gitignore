@@ -32,6 +32,11 @@ logs/
 .superpowers/
 .playwright-mcp/
 .claude/
+/artifacts/
+/design-qa-artifacts/
+/design-preview/
+/docs/design-exploration/
+/docs/superpowers/
 .vscode/
 .idea/
 .DS_Store

@@ -51,11 +51,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Check README assets
+      - name: Check public repository assets
         run: python scripts/check_readme_assets.py
       - name: Check tracked local-only paths
         run: |
-          if git ls-files | grep -E '(^|/)(\.env$|.*\.db$|.*\.sqlite$|.*\.sqlite3$|logs/|output/|data/local\.db|\.playwright-mcp/)' ; then
+          if git ls-files | grep -E '(^|/)(\.env$|.*\.db$|.*\.sqlite$|.*\.sqlite3$|logs/|output/|data/local\.db|\.playwright-mcp/|artifacts/|design-qa-artifacts/|design-preview/|docs/design-exploration/|docs/superpowers/)' ; then
             echo "Local-only file is tracked. Remove it or document why it is public."
+            exit 1
+          fi
+      - name: Check machine-specific paths
+        run: |
+          machine_path='/Users'"/mima1234"
+          codex_runtime='\.cache/codex'"-runtimes"
+          if git grep -n -I -E "${machine_path}|${codex_runtime}" -- . ; then
+            echo "Machine-specific path is tracked. Use a repository-relative or generic example path."
             exit 1
           fi

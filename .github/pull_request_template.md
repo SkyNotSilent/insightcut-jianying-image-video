@@ -14,7 +14,7 @@
 
 - [ ] Backend check: `cd ai-kepu-video-server && python -m compileall src api_server.py`
 - [ ] Frontend build: `cd ai-kepu-video-web/frontend && npm run build`
-- [ ] README asset check: `python3 scripts/check_readme_assets.py`
+- [ ] Repository asset check: `python3 scripts/check_readme_assets.py`
 - [ ] Manual page/task check described below, if relevant:
 
 ## Data / Migration Impact
