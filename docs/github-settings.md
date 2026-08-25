@@ -17,7 +17,7 @@ InsightCut
 Recommended description:
 
 ```text
-剪映 / Jianying / CapCut 可编辑图片视频工作台 · InsightCut：文稿转分镜、图片、配音、字幕和可编辑草稿，支持 MP4、素材包与剪映草稿导出。
+InsightCut — AI 图片视频与可编辑剪映草稿工作台：文稿转分镜、图片、配音和字幕，支持 Jianying draft / CapCut draft、MP4 与素材包。
 ```
 
 Recommended topics:
