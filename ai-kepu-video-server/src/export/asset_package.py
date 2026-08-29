@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 
-from src.utils.subtitle_text import normalize_subtitle_text
+from src.draft.subtitle import SubtitleWriter
 
 
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -210,27 +210,6 @@ def material_package_state(task_id: str, project_name: str, segments: Iterable[d
     }
 
 
-def _srt_text(entries: list[dict]) -> str:
-    cursor = 0.0
-    blocks = []
-    for entry in entries:
-        start = cursor
-        cursor += entry["duration_seconds"]
-        blocks.append(
-            f'{entry["order"]}\n{_srt_timestamp(start)} --> {_srt_timestamp(cursor)}\n'
-            f'{normalize_subtitle_text(entry["text"])}\n'
-        )
-    return "\n".join(blocks)
-
-
-def _srt_timestamp(seconds: float) -> str:
-    millis = int(max(0, seconds) * 1000)
-    hours, millis = divmod(millis, 3_600_000)
-    minutes, millis = divmod(millis, 60_000)
-    secs, millis = divmod(millis, 1000)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
-
-
 def _manifest(snapshot: dict, package_root: str) -> dict:
     segments = []
     for entry in snapshot["entries"]:
@@ -331,7 +310,7 @@ def build_material_package(task_id: str, project_name: str, segments: Iterable[d
                 )
                 archive.writestr(
                     f"{package_root}/metadata/subtitles.srt",
-                    _srt_text(snapshot["entries"]).encode("utf-8"),
+                    SubtitleWriter().render(snapshot["entries"], "srt").encode("utf-8"),
                 )
                 archive.writestr(f"{package_root}/README.txt", _readme_text().encode("utf-8"))
 

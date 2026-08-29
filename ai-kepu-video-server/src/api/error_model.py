@@ -25,6 +25,7 @@ class ErrorCode(str, Enum):
     CONTENT_POLICY = "content_policy"
     NETWORK = "network"
     DISK = "disk"
+    ASSET_MISSING = "asset_missing"
     CONFIG_MISSING = "config_missing"
     CONFLICT = "conflict"
     CANCELLED = "cancelled"
@@ -39,6 +40,7 @@ SAFE_MESSAGES = {
     ErrorCode.CONTENT_POLICY: "图片提示词未通过服务商内容检查，请修改提示词后重试。",
     ErrorCode.NETWORK: "无法连接生成服务，请检查网络后重试。",
     ErrorCode.DISK: "本地文件写入失败，请检查磁盘空间和目录权限。",
+    ErrorCode.ASSET_MISSING: "部分任务素材缺失，已保留现有内容，可补齐后继续。",
     ErrorCode.CONFIG_MISSING: "生成服务尚未配置完整，请先完成 API 配置。",
     ErrorCode.CONFLICT: "内容已在其他页面更新，请刷新后重试。",
     ErrorCode.CANCELLED: "本次操作已取消。",
@@ -53,6 +55,7 @@ _DEFAULT_RETRYABLE = {
     ErrorCode.CONTENT_POLICY: False,
     ErrorCode.NETWORK: True,
     ErrorCode.DISK: False,
+    ErrorCode.ASSET_MISSING: True,
     ErrorCode.CONFIG_MISSING: False,
     ErrorCode.CONFLICT: False,
     ErrorCode.CANCELLED: False,

@@ -16,11 +16,18 @@ test('task selection becomes the shared workspace and export context', () => {
   assert.match(component, /selectProject\(task\)/)
   assert.match(component, /task\.task_id === selectedProject\?\.taskId/)
   assert.match(component, /当前项目/)
-  assert.match(component, /task-current-context/)
+  assert.match(component, /selectedTask = allTasks\.find/)
+  assert.match(component, /isVisibleActivityTask\(task\)/)
 })
 
-test('the global task capsule points forward to project activity', () => {
+test('the global task bar stays expanded and the arrow browses unfinished project cards', () => {
   assert.match(component, /ChevronRight/)
-  assert.match(component, /<ChevronRight size=\{15\} aria-hidden="true" \/>/)
-  assert.doesNotMatch(component, /ChevronDown/)
+  assert.match(component, /aria-label="浏览更多项目"/)
+  assert.match(component, /<ChevronRight size=\{16\} \/>/)
+  assert.match(component, /HIDDEN_ACTIVITY_STATUSES.*cancelled.*deleting/)
+  assert.match(component, /export_ready/)
+  assert.match(component, /exported_at/)
+  assert.match(component, /可导出/)
+  assert.doesNotMatch(component, /setExpanded/)
+  assert.doesNotMatch(component, /aria-label="收起任务活动"/)
 })

@@ -12,6 +12,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Callable
 from threading import Thread, Lock
+from pathlib import Path
 from .models import (
     TaskStatus, StepStatus, TaskProgress,
     StepProgress, TaskResult, TaskResponse
@@ -21,6 +22,7 @@ from src.config import Config
 from .error_model import ErrorCode, SafeError, make_safe_error
 from .task_cleanup import DeletionReport, collect_task_paths, delete_task_files
 from .task_runtime import task_runtime
+from src.draft.atomic_finalize import validate_staged_draft
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,61 @@ WAITING_WORKFLOW_PHASES = {
     "awaiting_confirmation",
     "awaiting_finalization",
 }
+
+
+class CompletionIntegrityError(RuntimeError):
+    """A task result failed the final local asset/draft integrity gate."""
+
+    def __init__(self, message: str, safe_error: SafeError):
+        super().__init__(message)
+        self.safe_error = safe_error
+
+
+def _storage_candidates(raw_path: Optional[str]):
+    if not raw_path:
+        return []
+    try:
+        path = Path(raw_path)
+        if path.is_absolute():
+            return [path.resolve()]
+        base_dir = Config.BASE_DIR.resolve()
+        parts = path.parts
+        already_rooted = bool(
+            (parts and parts[0] == "output")
+            or (len(parts) >= 2 and parts[0] == "data" and parts[1] == "media")
+        )
+        candidates = (
+            [base_dir / path]
+            if already_rooted
+            else [
+                base_dir / "output" / path,
+                base_dir / "data" / "media" / path,
+                base_dir / path,
+            ]
+        )
+        return [candidate.resolve() for candidate in candidates]
+    except (OSError, RuntimeError):
+        return []
+
+
+def _resolve_local_file(raw_path: Optional[str]) -> Optional[Path]:
+    for candidate in _storage_candidates(raw_path):
+        try:
+            if candidate.is_file():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def _resolve_local_directory(raw_path: Optional[str]) -> Optional[Path]:
+    for candidate in _storage_candidates(raw_path):
+        try:
+            if candidate.is_dir():
+                return candidate
+        except OSError:
+            continue
+    return None
 
 
 def _stale_task_timeout_seconds(step_name: str) -> int:
@@ -308,6 +365,15 @@ class TaskManager:
             memory_task = self.tasks.get(task_id)
         if memory_task:
             db_data = db_client.get_task(task_id)
+            if db_data and self.reconcile_completed_task_data(db_data):
+                db_data = db_client.get_task(task_id)
+                rebuilt = self._rebuild_task_from_db(db_data)
+                with self.lock:
+                    if rebuilt:
+                        self.tasks[task_id] = rebuilt
+                    else:
+                        self.tasks.pop(task_id, None)
+                return rebuilt
             if db_data and self.fail_stale_task_data(db_data):
                 rebuilt = self._rebuild_task_from_db(db_data)
                 with self.lock:
@@ -328,6 +394,8 @@ class TaskManager:
             }:
                 db_data = db_client.get_task(task_id)
                 if db_data:
+                    self.reconcile_completed_task_data(db_data)
+                    db_data = db_client.get_task(task_id)
                     self.fail_stale_task_data(db_data)
                     task = self._rebuild_task_from_db(db_data)
                     if task:
@@ -345,6 +413,8 @@ class TaskManager:
         # 3. 从本地数据库获取
         db_data = db_client.get_task(task_id)
         if db_data:
+            self.reconcile_completed_task_data(db_data)
+            db_data = db_client.get_task(task_id)
             self.fail_stale_task_data(db_data)
             task = self._rebuild_task_from_db(db_data)
             if task:
@@ -498,7 +568,7 @@ class TaskManager:
             "workflow_phase": task.workflow_phase,
             "plan_version": task.plan_version,
             "voice_confirmed": task.voice_confirmed,
-            "result": task.result.dict() if task.result else None,
+            "result": task.result.model_dump() if task.result else None,
         }
 
     def invalidate_task_cache(self, task_id: str) -> None:
@@ -512,6 +582,7 @@ class TaskManager:
         rows = db_client.list_tasks(status=status, limit=limit, offset=offset)
         changed = False
         for row in rows:
+            changed = self.reconcile_completed_task_data(row) or changed
             changed = self.fail_stale_task_data(row) or changed
         if changed:
             rows = db_client.list_tasks(status=status, limit=limit, offset=offset)
@@ -569,6 +640,140 @@ class TaskManager:
         data["error"] = error
         return True
 
+    def _completion_issues(
+        self,
+        task_id: str,
+        draft_path: Optional[str],
+        segments_count: Optional[int] = None,
+    ):
+        segments = db_client.get_segments(task_id)
+        missing = []
+        expected_count = len(segments)
+        if not segments:
+            missing.append({"asset_type": "segments", "segment_index": None})
+        if segments_count is not None and int(segments_count) != expected_count:
+            missing.append({"asset_type": "segments", "segment_index": None})
+        for segment in segments:
+            segment_index = int(segment.get("segment_index") or 0)
+            for asset_type in ("image", "audio"):
+                status = str(segment.get(f"{asset_type}_status") or "pending")
+                path = segment.get(f"{asset_type}_path")
+                file_ready = _resolve_local_file(path) is not None
+                if not (status == "completed" or (status == "stale" and file_ready)) or not file_ready:
+                    missing.append({
+                        "asset_type": asset_type,
+                        "segment_index": segment_index,
+                        "persisted_status": status,
+                    })
+
+        draft_issue = None
+        draft_dir = _resolve_local_directory(draft_path)
+        if draft_dir is None:
+            draft_issue = "草稿目录缺失"
+        else:
+            try:
+                validate_staged_draft(draft_dir)
+            except (OSError, ValueError):
+                draft_issue = "草稿预检未通过"
+        return segments, missing, draft_issue
+
+    def _interrupt_for_integrity(
+        self,
+        task_id: str,
+        missing,
+        draft_issue: Optional[str],
+    ) -> SafeError:
+        safe = SafeError(
+            code=ErrorCode.ASSET_MISSING,
+            retryable=True,
+            safe_message="部分任务素材缺失，已保留现有内容，可补齐后继续。",
+            provider="local_storage",
+        )
+        for item in missing:
+            asset_type = item.get("asset_type")
+            segment_index = item.get("segment_index")
+            if asset_type not in {"image", "audio"} or segment_index is None:
+                continue
+            # A completed/stale checkpoint whose local file temporarily vanished
+            # remains a truthful historical checkpoint. Workspace health derives
+            # the missing-file recovery target from the filesystem, and the asset
+            # becomes usable again if the file is restored.
+            if item.get("persisted_status") in {"completed", "stale"}:
+                continue
+            db_client.update_segment(
+                task_id,
+                int(segment_index),
+                {
+                    f"{asset_type}_status": "failed",
+                    f"{asset_type}_error": safe.safe_message,
+                    f"{asset_type}_error_code": safe.code.value,
+                    f"{asset_type}_error_meta": safe.metadata(),
+                },
+            )
+        workflow_phase = "generating_assets" if missing else "awaiting_finalization"
+        current_step = "asset_repair" if missing else "finalize"
+        db_client.mark_task_interrupted(
+            task_id,
+            current_step,
+            safe.safe_message,
+            error_code=safe.code.value,
+            error_meta=safe.metadata(),
+        )
+        db_client.update_task_workflow(
+            task_id,
+            workflow_phase,
+            status=TaskStatus.INTERRUPTED.value,
+            current_step=current_step,
+        )
+        self.invalidate_task_cache(task_id)
+        logger.warning(
+            "[%s] 完成态一致性检查未通过: missing=%s draft=%s",
+            task_id,
+            len(missing),
+            bool(draft_issue),
+        )
+        return safe
+
+    def reconcile_completed_task_data(self, data: dict) -> bool:
+        """Repair legacy false-completed rows without deleting or regenerating assets."""
+        if not data or data.get("status") != TaskStatus.COMPLETED.value:
+            return False
+        task_id = data["task_id"]
+        result = data.get("result") or {}
+        draft_path = result.get("draft_path") or data.get("draft_path")
+        segments_count = result.get("segments_count")
+        if segments_count is None:
+            segments_count = data.get("segments_count")
+        _segments, missing, draft_issue = self._completion_issues(
+            task_id,
+            draft_path,
+            segments_count,
+        )
+        if not missing and not draft_issue:
+            return False
+        self._interrupt_for_integrity(task_id, missing, draft_issue)
+        data["status"] = TaskStatus.INTERRUPTED.value
+        return True
+
+    def reconcile_completed_tasks(self, limit: int = 500) -> int:
+        repaired = 0
+        offset = 0
+        while repaired + offset < limit:
+            rows = db_client.list_tasks(
+                status=TaskStatus.COMPLETED.value,
+                limit=min(100, limit - repaired - offset),
+                offset=offset,
+            )
+            if not rows:
+                break
+            changed = sum(1 for row in rows if self.reconcile_completed_task_data(row))
+            repaired += changed
+            if changed == 0:
+                offset += len(rows)
+            if len(rows) < 100:
+                break
+        return repaired
+
     def mark_stale_tasks_failed(self, limit: int = 200) -> int:
         """兼容旧启动调用，遗留任务现在标记为可恢复的中断状态。"""
         return self.mark_orphaned_tasks_interrupted(limit=limit)
@@ -609,14 +814,21 @@ class TaskManager:
         task = self.get_task(task_id)
         if task:
             task.status = status
-            if status == TaskStatus.PROCESSING:
+            if status in {TaskStatus.PROCESSING, TaskStatus.COMPLETED}:
                 task.error = None
                 task.error_code = None
                 task.error_meta = None
             logger.info(f"[{task_id}] 状态更新: {status}")
 
             # 更新到本地数据库
-            db_client.update_task_status(task_id, status, task.current_step, task.error)
+            db_client.update_task_status(
+                task_id,
+                status.value,
+                task.current_step,
+                task.error,
+                error_code=task.error_code,
+                error_meta=task.error_meta,
+            )
 
             # 更新到内存缓存
             redis_client.cache_task(task_id, self._task_to_dict(task))
@@ -672,6 +884,37 @@ class TaskManager:
 
             # 更新到内存缓存
             redis_client.cache_task(task_id, self._task_to_dict(task))
+
+    def complete_task(
+        self,
+        task_id: str,
+        draft_path: str,
+        segments_count: int,
+        draft_url: str = None,
+        video_url: str = None,
+    ) -> Task:
+        """Validate and atomically expose a task as completed."""
+        _segments, missing, draft_issue = self._completion_issues(
+            task_id, draft_path, segments_count
+        )
+        if missing or draft_issue:
+            safe = self._interrupt_for_integrity(task_id, missing, draft_issue)
+            raise CompletionIntegrityError(safe.safe_message, safe)
+        if not db_client.complete_task_with_result(
+            task_id,
+            draft_path,
+            segments_count,
+            draft_url=draft_url,
+            video_url=video_url,
+            workflow_phase="ready",
+        ):
+            safe = make_safe_error(ErrorCode.UNKNOWN)
+            raise CompletionIntegrityError(safe.safe_message, safe)
+        self.invalidate_task_cache(task_id)
+        task = self.get_task(task_id)
+        if not task:
+            raise RuntimeError("任务完成后无法读取")
+        return task
 
     def set_task_error(
         self,

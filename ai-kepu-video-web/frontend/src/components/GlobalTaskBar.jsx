@@ -1,5 +1,5 @@
-import { Check, ChevronRight, CircleAlert, LoaderCircle, MoreHorizontal, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { Check, CheckCircle2, ChevronRight, CircleAlert, LoaderCircle, MoreHorizontal, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import { cancelTask, getTaskActivity } from '../api/task'
@@ -8,17 +8,25 @@ import { PROJECT_SELECTION_EVENT, projectIdFromPath, readSelectedProject, select
 import { toast } from '../lib/toast'
 
 const STEP_LABELS = ['写文稿', '生成预案', '确认音色', '确认画面', '生成素材', '完成导出']
+const HIDDEN_ACTIVITY_STATUSES = new Set(['cancelled', 'deleting'])
+
+function isVisibleActivityTask(task) {
+  if (!task?.task_id || HIDDEN_ACTIVITY_STATUSES.has(task.status) || task.exported_at) return false
+  if (task.status === 'completed') return task.export_ready !== false
+  return true
+}
 
 function TaskCard({ task, selected, onOpen, onCancel }) {
-  const attention = ['awaiting_confirmation', 'awaiting_finalization', 'interrupted', 'failed'].includes(task.status)
-  return <article className={`task-activity-card${attention ? ' needs-attention' : ''}${selected ? ' is-selected' : ''}`}>
+  const exportReady = task.export_ready === true || (task.status === 'completed' && !task.exported_at)
+  const attention = !exportReady && ['awaiting_confirmation', 'awaiting_finalization', 'interrupted', 'failed'].includes(task.status)
+  return <article className={`task-activity-card${attention ? ' needs-attention' : ''}${exportReady ? ' is-export-ready' : ''}${selected ? ' is-selected' : ''}`}>
     <button type="button" className="task-activity-card-main" aria-pressed={selected} onClick={() => onOpen(task)}>
       <span className="task-activity-card-icon" aria-hidden="true">
-        {attention ? <CircleAlert size={15} /> : <LoaderCircle size={15} />}
+        {exportReady ? <CheckCircle2 size={15} /> : attention ? <CircleAlert size={15} /> : <LoaderCircle size={15} />}
       </span>
       <span className="task-activity-card-copy">
         <strong>{task.name}</strong>
-        <small>{String(task.step || 1).padStart(2, '0')} · {STEP_LABELS[(task.step || 1) - 1] || task.stage}{selected ? <em><Check size={10} />当前项目</em> : null}</small>
+        <small>{exportReady ? '06 · 可导出' : `${String(task.step || 1).padStart(2, '0')} · ${task.activity_label || STEP_LABELS[(task.step || 1) - 1] || task.stage}`}{selected ? <em><Check size={10} />当前项目</em> : null}</small>
       </span>
       <span className="task-activity-card-percent">{task.progress}%</span>
       <span className="task-activity-card-progress"><i style={{ width: `${task.progress}%` }} /></span>
@@ -34,8 +42,8 @@ export function GlobalTaskBar() {
   const navigate = useNavigate()
   const location = useLocation()
   const [activity, setActivity] = useState({ running: [], attention: [], recent: [], counts: { running: 0, attention: 0 } })
-  const [expanded, setExpanded] = useState(false)
   const [selectedProject, setSelectedProject] = useState(readSelectedProject)
+  const trackRef = useRef(null)
   const routeTaskId = projectIdFromPath(location.pathname)
 
   const poll = usePollingResource({
@@ -53,9 +61,9 @@ export function GlobalTaskBar() {
   }, [activity])
   const visibleTasks = useMemo(
     () => {
-      const primary = [...(activity.running || []), ...(activity.attention || []), ...(activity.recent || []).slice(0, 4)]
-      const unique = [...new Map(primary.filter(Boolean).map(task => [task.task_id, task])).values()]
-      const selectedTask = allTasks.find(task => task.task_id === selectedProject?.taskId)
+      const primary = [...(activity.running || []), ...(activity.attention || []), ...(activity.recent || [])]
+      const unique = [...new Map(primary.filter(isVisibleActivityTask).map(task => [task.task_id, task])).values()]
+      const selectedTask = allTasks.find(task => task.task_id === selectedProject?.taskId && isVisibleActivityTask(task))
       return selectedTask ? [selectedTask, ...unique.filter(task => task.task_id !== selectedTask.task_id)] : unique
     },
     [activity, allTasks, selectedProject?.taskId],
@@ -95,7 +103,6 @@ export function GlobalTaskBar() {
   const handleOpen = task => {
     const next = selectProject(task)
     if (next) setSelectedProject(next)
-    setExpanded(false)
     navigate(location.pathname.startsWith('/export/')
       ? `/export/${task.task_id}`
       : location.pathname.startsWith('/workspace/')
@@ -103,20 +110,20 @@ export function GlobalTaskBar() {
         : task.target_route || `/workspace/${task.task_id}`)
   }
 
-  return <section className={`global-task-bar${expanded ? ' is-expanded' : ''}`} aria-label="全局任务活动">
-    <button type="button" className="global-task-capsule" onClick={() => setExpanded(value => !value)} aria-expanded={expanded}>
-      <span className={`task-live-dot${activity.counts?.running ? ' is-live' : ''}`} aria-hidden="true" />
-      <strong>运行 {activity.counts?.running || 0} 项</strong>
-      <span>待处理 {activity.counts?.attention || 0} 项</span>
-      {selectedProject ? <span className="task-current-context"><em>当前</em>{selectedProject.name || `项目 ${selectedProject.taskId.slice(0, 6)}`}</span> : <small>未选择项目</small>}
-      <ChevronRight size={15} aria-hidden="true" />
-    </button>
-    {expanded ? <div className="global-task-drawer">
-      <strong className="global-task-drawer-label">任务</strong>
-      {visibleTasks.length ? <div className="global-task-track">
+  const browseMore = () => {
+    const track = trackRef.current
+    if (!track) return
+    const atEnd = track.scrollLeft + track.clientWidth >= track.scrollWidth - 8
+    track.scrollTo({ left: atEnd ? 0 : track.scrollLeft + Math.min(224, track.clientWidth * .8), behavior: 'smooth' })
+  }
+
+  return <section className="global-task-bar" aria-label="全局任务活动">
+    <div className="global-task-drawer">
+      <strong className="global-task-drawer-label"><span className={`task-live-dot${activity.counts?.running ? ' is-live' : ''}`} aria-hidden="true" />进行中 {visibleTasks.length}</strong>
+      {visibleTasks.length ? <div ref={trackRef} className="global-task-track">
         {visibleTasks.map(task => <TaskCard key={task.task_id} task={task} selected={task.task_id === selectedProject?.taskId} onOpen={handleOpen} onCancel={handleCancel} />)}
-      </div> : <div className="global-task-empty">暂无运行或待处理任务。可以从文稿页开始一个新项目。</div>}
-      <button type="button" className="icon-button global-task-drawer-close" onClick={() => setExpanded(false)} aria-label="收起任务活动"><X size={15} /></button>
-    </div> : null}
+      </div> : <div className="global-task-empty">暂无进行中或待处理项目。可以从文稿页开始一个新项目。</div>}
+      <button type="button" className="icon-button global-task-drawer-next" onClick={browseMore} aria-label="浏览更多项目" title="浏览更多项目" disabled={visibleTasks.length < 2}><ChevronRight size={16} /></button>
+    </div>
   </section>
 }

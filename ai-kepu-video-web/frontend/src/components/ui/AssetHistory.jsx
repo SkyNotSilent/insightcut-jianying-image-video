@@ -31,20 +31,23 @@ export function AssetHistory({
         <ol className="asset-history-rail">
           {versions.map((version, index) => {
             const isSelected = version.id === selectedId
+            const versionLabel = version.label || `版本 ${index + 1}`
+            const versionTime = version.createdAt || version.description || '时间未知'
             return (
               <li key={version.id} className={isSelected ? 'is-selected' : ''}>
                 <button
                   type="button"
                   className="asset-history-version"
                   aria-pressed={isSelected}
+                  aria-label={`${versionLabel} ${versionTime}`}
                   onClick={() => onSelect?.(version, index)}
                 >
                   <span className="asset-history-preview">
                     {renderPreview ? renderPreview(version, index) : version.thumbnail ? <img src={version.thumbnail} alt="" /> : <History size={20} aria-hidden="true" />}
                   </span>
                   <span className="asset-history-copy">
-                    <strong>{version.label || `版本 ${index + 1}`}</strong>
-                    <small>{version.createdAt || version.description || '时间未知'}</small>
+                    <strong>{versionLabel}</strong>
+                    <small>{versionTime}</small>
                   </span>
                   {isSelected ? <Check className="asset-history-check" size={15} aria-hidden="true" /> : null}
                 </button>

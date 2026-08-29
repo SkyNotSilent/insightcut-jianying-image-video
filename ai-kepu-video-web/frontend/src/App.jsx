@@ -10,6 +10,8 @@ import { ProjectAssetDetailPage } from './pages/ProjectAssetDetailPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { TemplatesPage } from './pages/TemplatesPage'
 import { WorkspacePage } from './pages/WorkspacePage'
+import { BatchListPage } from './pages/BatchListPage'
+import { BatchDetailPage } from './pages/BatchDetailPage'
 import { getDraft } from './utils/projectDrafts'
 
 export default function App() {
@@ -30,6 +32,8 @@ function AppSurface() {
         <Routes>
           <Route path="/" element={<Navigate to="/manuscript" replace />} />
           <Route path="/manuscript/:draftId?" element={<ManuscriptPage />} />
+          <Route path="/batches" element={<BatchListPage />} />
+          <Route path="/batches/:batchId" element={<BatchDetailPage />} />
           <Route path="/workspace/:taskId/*" element={<WorkspacePage />} />
           <Route path="/production/:draftId" element={<ProductionRedirect />} />
           <Route path="/process/:taskId" element={<WorkspaceRedirect />} />

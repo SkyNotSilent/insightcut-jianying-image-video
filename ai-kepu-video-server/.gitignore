@@ -41,3 +41,4 @@ Thumbs.db
 .claude
 logs
 data/
+.e2e-runtime/

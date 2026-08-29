@@ -5,6 +5,7 @@
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -150,7 +151,7 @@ class ArticleGenerator:
             field.get("id") == "api_key" and field.get("required")
             for field in credential_fields
         )
-        if requires_api_key and not self.api_key:
+        if requires_api_key and not self.api_key and os.getenv("INSIGHTCUT_FAKE_PROVIDERS") != "1":
             raise ValueError("LLM API Key 未配置")
 
     def _load_config(self) -> dict:
@@ -190,6 +191,14 @@ class ArticleGenerator:
         return kwargs
 
     def _call_api(self, messages: list, max_tokens: int = 2048) -> str:
+        if os.getenv("INSIGHTCUT_FAKE_PROVIDERS") == "1":
+            prompt = "\n".join(str(item.get("content") or "") for item in messages)
+            if '"script"' in prompt and '"summary"' in prompt:
+                return json.dumps({
+                    "script": "这是隔离测试生成的第一段科普文稿。\n\n这是第二段，用来验证批量预案会停在人工确认阶段。",
+                    "summary": "隔离测试通过本地假供应商验证文稿、分镜与图片提示词的完整持久化。",
+                }, ensure_ascii=False)
+            return "cinematic educational scene, clear subject, natural light, detailed composition"
         import litellm
 
         kwargs = self._build_completion_kwargs(messages, max_tokens)

@@ -37,7 +37,7 @@ lsof -ti:2002 | xargs kill -9 2>/dev/null || true
 ```bash
 cd ai-kepu-video-server && \
 source venv/bin/activate && \
-python -m uvicorn api_server:app --host 0.0.0.0 --port 2002 --reload
+python -m uvicorn api_server:app --host 127.0.0.1 --port 2002 --reload
 ```
 - 后端地址：http://localhost:2002
 - API 文档：http://localhost:2002/docs
@@ -66,11 +66,14 @@ npm run dev
 2. **虚拟环境**：后端需要激活 venv 虚拟环境
 3. **后台运行**：两个服务都应该在后台运行（`run_in_background: true`）
 4. **启动顺序**：先启动后端，再启动前端（避免前端启动时后端未就绪）
+5. **本机安全边界**：后端默认只监听 `127.0.0.1`；CORS 只允许 `http://localhost:2001` 和 `http://127.0.0.1:2001`，不得恢复任意跨域或局域网监听。
+6. **批量预案**：Web 的“批量预案”支持 2–50 个主题、并发 1–3；只生成文稿、分镜和图片提示词并停在确认阶段，不自动生图或配音。CLI 使用 `python main.py batch --file topics.txt --concurrency 1..3 [--no-wait]`，通过同一后端 API 执行。
+7. **字幕与导出**：SRT/VTT、字幕资产和素材包必须复用 `SubtitleWriter`；导出必须经过 `AutoExporter` 的文件存在性与草稿预检，禁止用布尔值伪造成功。
 
 ## 开发注意事项
 
-- 前端使用 React 19 + React Router 7 + Vite 4
-- 后端使用 FastAPI + Python 3.9
+- 前端使用 React 19 + React Router 7 + Vite 8
+- 后端使用 FastAPI + Python 3.10+（CI 使用 Python 3.11；安全修复版依赖不再支持 Python 3.9）
 - 素材库按 `segment_index` 排序展示（播放顺序）
 - 本地维护巡检：在 `ai-kepu-video-server/` 下运行 `python scripts/maintenance_report.py --dry-run` 查看日志、数据库、媒体目录体量和未引用素材；只有显式使用 `--apply` 才会删除未被数据库引用的媒体文件。
 - **任务失败不能丢已生成内容**：任何任务被标记为 `failed` 时，已经生成的分镜文本、图片 prompt、图片、音频、草稿文件等资产必须继续入库并在素材库/预览页正常展示；失败状态只表示后续流程停止，不代表清空或隐藏已有资产。

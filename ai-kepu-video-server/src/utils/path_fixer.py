@@ -101,7 +101,7 @@ def apply_extract_path(
     target_os: str = "windows",
     force: bool = False,
 ) -> dict:
-    """将 draft_content.json 中的相对路径转为基于 extract_path 的绝对路径。
+    r"""将 draft_content.json 中的相对路径转为基于 extract_path 的绝对路径。
 
     target_os=windows: C:\...\草稿名\images\seg_000.png
     target_os=mac: /Users/.../草稿名/images/seg_000.png

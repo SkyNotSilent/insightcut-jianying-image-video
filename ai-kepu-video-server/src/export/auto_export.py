@@ -1,92 +1,108 @@
-"""
-自动导出模块
-自动打开剪映并导出成片
-"""
+"""Verified export orchestration shared by API delivery targets."""
 
-import logging
-import time
+from __future__ import annotations
+
+import os
+import platform
+import subprocess
 from pathlib import Path
+from typing import Callable, Dict, Optional
 
-logger = logging.getLogger(__name__)
+from src.draft.atomic_finalize import validate_staged_draft
+
+
+class ExportVerificationError(RuntimeError):
+    """The handler returned before publishing a usable output."""
+
+
+def open_output_directory(path: Path) -> None:
+    directory = Path(path).resolve()
+    if not directory.is_dir():
+        raise FileNotFoundError("输出目录不存在")
+    system = platform.system().lower()
+    if system == "windows":
+        os.startfile(str(directory))  # type: ignore[attr-defined]
+        return
+    command = ["open", str(directory)] if system == "darwin" else ["xdg-open", str(directory)]
+    subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+    )
 
 
 class AutoExporter:
-    """自动导出器 - 自动打开剪映并导出"""
-    
-    def __init__(self,剪映_path: str = "C:/Program Files/CapCut/CapCut.exe"):
-        """
-        初始化自动导出器
-        
-        Args:
-            剪映_path: 剪映可执行文件路径
-        """
-        self.剪映_path = 剪映_path
-        
-    def export(self, draft_path: str, output_path: str,
-              resolution: str = "1080p",
-              framerate: int = 30) -> bool:
-        """
-        自动导出草稿
-        
-        Args:
-            draft_path: 草稿路径
-            output_path: 输出路径
-            resolution: 分辨率
-            framerate: 帧率
-            
-        Returns:
-            是否成功
-        """
-        logger.info(f"开始自动导出: {draft_path}")
-        
+    """Dispatch real handlers, verify their artifacts, then optionally reveal them."""
+
+    def __init__(
+        self,
+        handlers: Dict[str, Callable[[], dict]],
+        *,
+        directory_opener: Optional[Callable[[Path], None]] = None,
+    ):
+        self.handlers = dict(handlers or {})
+        self.directory_opener = directory_opener or open_output_directory
+
+    @staticmethod
+    def _file(result: dict, key: str) -> Path:
+        path = Path(str(result.get(key) or ""))
+        if not result.get(key) or not path.is_file() or path.stat().st_size <= 0:
+            raise ExportVerificationError(f"导出结果缺少有效文件: {key}")
+        return path.resolve()
+
+    @staticmethod
+    def _draft(result: dict) -> Path:
+        path = Path(str(result.get("draft_path") or ""))
+        if not result.get("draft_path") or not path.is_dir():
+            raise ExportVerificationError("导出结果缺少有效草稿目录")
         try:
-            # TODO: 实现自动导出逻辑
-            # 可以使用 pyautogui 或 uiautomation 库
-            # 1. 打开剪映
-            # 2. 导入草稿
-            # 3. 设置导出参数
-            # 4. 开始导出
-            # 5. 等待导出完成
-            
-            logger.info(f"导出成功: {output_path}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"导出失败: {e}")
-            return False
-    
-    def batch_export(self, draft_paths: list, output_dir: str) -> dict:
-        """
-        批量导出
-        
-        Args:
-            draft_paths: 草稿路径列表
-            output_dir: 输出目录
-            
-        Returns:
-            导出结果统计
-        """
-        results = {
-            "success": [],
-            "failed": []
-        }
-        
-        for draft_path in draft_paths:
-            output_path = Path(output_dir) / Path(draft_path).name
-            success = self.export(draft_path, str(output_path))
-            
-            if success:
-                results["success"].append(draft_path)
-            else:
-                results["failed"].append(draft_path)
-        
-        return results
+            validate_staged_draft(path)
+        except (OSError, ValueError) as error:
+            raise ExportVerificationError("剪映草稿预检未通过") from error
+        return path.resolve()
+
+    def _verify(self, target: str, result: dict) -> Path:
+        if not isinstance(result, dict):
+            raise ExportVerificationError("导出处理器未返回结构化结果")
+        if target == "mp4":
+            return self._file(result, "video_path")
+        if target == "materials":
+            return self._file(result, "zip_path")
+        if target == "draft":
+            draft = self._draft(result)
+            self._file(result, "zip_path")
+            return draft
+        if target == "draft_local":
+            return self._draft(result)
+        raise ExportVerificationError("不支持的导出类型")
+
+    def export(self, target: str, *, reveal_output: bool = False) -> dict:
+        handler = self.handlers.get(target)
+        if handler is None:
+            raise ExportVerificationError("不支持的导出类型")
+        raw_result = handler()
+        if not isinstance(raw_result, dict):
+            raise ExportVerificationError("导出处理器未返回结构化结果")
+        result = dict(raw_result)
+        output = self._verify(target, result)
+        warnings = list(result.get("warnings") or [])
+        revealed = False
+        if reveal_output:
+            directory = output if output.is_dir() else output.parent
+            try:
+                self.directory_opener(directory)
+                revealed = True
+            except Exception:
+                warnings.append("导出已完成，但无法自动打开输出目录。")
+        result.update({
+            "success": True,
+            "verified": True,
+            "revealed_output": revealed,
+            "warnings": warnings,
+        })
+        return result
 
 
-if __name__ == "__main__":
-    # 测试代码
-    exporter = AutoExporter()
-    
-    # 示例
-    # success = exporter.export("draft_path", "output.mp4")
-    # print(f"导出成功: {success}")
+__all__ = ["AutoExporter", "ExportVerificationError", "open_output_directory"]

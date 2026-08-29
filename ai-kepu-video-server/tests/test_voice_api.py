@@ -530,6 +530,36 @@ def test_awaiting_confirmation_does_not_offer_asset_repair_for_pending_media(
     assert workspace["capabilities"]["update_stale_assets"] is False
 
 
+def test_workspace_recovers_legacy_script_from_ordered_segments(
+    temp_db, monkeypatch
+):
+    temp_db.create_task(
+        "legacy-script",
+        "旧任务主题",
+        "知识科普|电影质感",
+        100,
+        execution_mode="review_first",
+    )
+    temp_db.save_segments("legacy-script", [
+        {"segment_index": 8, "text": "第二段。", "image_prompt": "提示二"},
+        {"segment_index": 4, "text": "第一段。", "image_prompt": "提示一"},
+    ])
+    monkeypatch.setattr(routes, "mysql_client", temp_db)
+    monkeypatch.setattr(routes.task_manager, "fail_stale_task_data", lambda _row: False)
+    request = Request({
+        "type": "http",
+        "scheme": "http",
+        "server": ("testserver", 80),
+        "path": "/workspace",
+        "headers": [],
+    })
+
+    workspace = asyncio.run(routes.get_task_workspace("legacy-script", request))
+
+    assert workspace["script_text"] == "第一段。\n第二段。"
+    assert workspace["script_source"] == "reconstructed_segments"
+
+
 def test_workspace_separates_stale_assets_from_failed_recovery_targets(
     tmp_path, temp_db, monkeypatch
 ):

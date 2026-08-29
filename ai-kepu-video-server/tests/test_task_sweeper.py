@@ -267,6 +267,11 @@ def test_fastapi_lifespan_owns_sweeper_start_stop_and_join(monkeypatch):
         "mark_orphaned_tasks_interrupted",
         lambda: calls.append("interrupt") or 0,
     )
+    monkeypatch.setattr(
+        api_server.task_manager,
+        "reconcile_completed_tasks",
+        lambda: calls.append("reconcile") or 0,
+    )
 
     async def exercise_lifespan():
         async with api_server.lifespan(api_server.app):
@@ -275,7 +280,9 @@ def test_fastapi_lifespan_owns_sweeper_start_stop_and_join(monkeypatch):
     asyncio.run(exercise_lifespan())
 
     labels = [item if isinstance(item, str) else item[0] for item in calls]
-    assert labels == ["delete", "interrupt", "start", "serving", "stop", "join"]
+    assert labels == [
+        "delete", "interrupt", "reconcile", "start", "serving", "stop", "join"
+    ]
     join_call = next(item for item in calls if isinstance(item, tuple))
     assert join_call[1] == 30.0
     assert join_call[2] != threading.main_thread().name

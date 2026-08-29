@@ -36,10 +36,20 @@ test('manuscript uses one writing canvas and one unified settings panel', () => 
   assert.match(creationCss, /\.manuscript-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(320px, 372px\)/)
   assert.match(creationCss, /\.manuscript-settings\s*\{[^}]*min-height:\s*calc\(100vh - 116px\)[^}]*max-height:\s*calc\(100vh - 116px\)[^}]*position:\s*sticky[^}]*overflow-y:\s*auto/)
   assert.match(creationCss, /@media \(max-width: 960px\)[\s\S]*?\.manuscript-settings\s*\{[^}]*max-height:\s*none[^}]*position:\s*static/)
-  assert.equal((manuscriptPage.match(/className="work-panel/g) || []).length, 1)
+  assert.equal((manuscriptPage.match(/className="work-panel/g) || []).length, 2)
   assert.match(manuscriptPage, /PanelHeading eyebrow="创作配置" title="文稿设置"/)
   assert.match(manuscriptPage, /<legend>任务来源<\/legend>/)
   assert.doesNotMatch(manuscriptPage, /title="文稿准备"|title="画面设置"/)
+})
+
+test('batch creation reuses the single-project canvas and settings shell', () => {
+  assert.match(manuscriptPage, /className="manuscript-layout batch-composer-layout"/)
+  assert.match(manuscriptPage, /className="writing-canvas batch-topic-sheet"/)
+  assert.match(manuscriptPage, /className="work-panel manuscript-settings batch-composer-settings"/)
+  assert.match(manuscriptPage, /className="canvas-heading"/)
+  assert.match(manuscriptPage, /className="paper-editor-shell batch-topic-editor"/)
+  assert.doesNotMatch(creationCss, /\.batch-flow-note\s*\{[^}]*border:/)
+  assert.doesNotMatch(creationCss, /\.batch-topic-sheet\s*>\s*header\s+h1[^}]*font-size:\s*clamp/)
 })
 
 test('selected cards use a complete perimeter instead of a single colored edge', () => {

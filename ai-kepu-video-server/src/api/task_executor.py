@@ -14,7 +14,7 @@ from pathlib import Path
 from threading import Event, Thread
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from typing import Any, Dict, List, Optional
-from .task_manager import task_manager, TaskStatus
+from .task_manager import CompletionIntegrityError, task_manager, TaskStatus
 from .task_runtime import TaskCancellation, TaskCancelled, task_runtime
 from src.core.pipeline import VideoEditorPipeline
 from src.database import db_client
@@ -1808,6 +1808,7 @@ class TaskExecutor:
                         script_text=pipeline.article,
                         summary=pipeline.summary,
                         input_mode=input_mode,
+                        script_source="reconstructed_segments",
                     ),
                     "旧任务脚本检查点",
                 )
@@ -1820,6 +1821,7 @@ class TaskExecutor:
                         script_text=pipeline.article,
                         summary=pipeline.summary,
                         input_mode=input_mode,
+                        script_source="user_input",
                     ),
                     "原文脚本检查点",
                 )
@@ -1838,6 +1840,7 @@ class TaskExecutor:
                         script_text=pipeline.article,
                         summary=pipeline.summary,
                         input_mode=input_mode,
+                        script_source="generated",
                     ),
                     "脚本检查点",
                 )
@@ -2801,10 +2804,13 @@ class TaskExecutor:
             logger.info(f"[{task_id}] 段落数据保存成功，共 {len(segments_data)} 段")
 
             # 设置任务结果
-            task_manager.set_task_result(task_id, draft_path, segments_count, draft_url, video_url)
-            task.workflow_phase = "ready"
-            db_client.update_task_workflow(task_id, "ready")
-            task_manager.update_task_status(task_id, TaskStatus.COMPLETED)
+            task_manager.complete_task(
+                task_id,
+                draft_path,
+                segments_count,
+                draft_url=draft_url,
+                video_url=video_url,
+            )
 
             image_ok, image_failed = _asset_counts(pipeline.media_paths)
             audio_ok, audio_failed = _asset_counts(pipeline.voiceover_files)
@@ -2824,6 +2830,15 @@ class TaskExecutor:
                 error_code=safe.code.value,
                 error_meta=safe.metadata(),
             )
+        except CompletionIntegrityError as error:
+            safe = error.safe_error
+            logger.warning(
+                "[%s] 完成态原子校验未通过: %s",
+                task_id,
+                safe.safe_message,
+            )
+            # complete_task 已持久化可恢复状态；这里只负责避免通用异常路径
+            # 将它覆盖成 failed。
         except RecoverableTaskError as error:
             safe = _safe_failure(error)
             logger.warning(

@@ -23,6 +23,7 @@ if env_path.exists():
 from src.api.routes import router
 from src.api.task_manager import task_manager
 from src.api.task_sweeper import task_sweeper
+from src.api.batch_manager import batch_scheduler
 from src.api.error_model import (
     ErrorCode,
     make_safe_error,
@@ -47,10 +48,15 @@ async def startup_event():
     )
     if interrupted_count:
         logger.warning(f"启动时已将 {interrupted_count} 个遗留任务标记为中断，可继续生成")
+    reconciled_count = await asyncio.to_thread(task_manager.reconcile_completed_tasks)
+    if reconciled_count:
+        logger.warning(
+            f"启动时已将 {reconciled_count} 个素材不完整的完成任务恢复为可修复状态"
+        )
     logger.info("=" * 60)
     logger.info("InsightCut API 启动")
-    logger.info("API 文档: http://0.0.0.0:2002/docs")
-    logger.info("健康检查: http://0.0.0.0:2002/health")
+    logger.info("API 文档: http://127.0.0.1:2002/docs")
+    logger.info("健康检查: http://127.0.0.1:2002/health")
     logger.info("=" * 60)
 
 
@@ -64,13 +70,18 @@ async def lifespan(_app: FastAPI):
     """Own exactly one sweeper for the lifetime of this worker process."""
     await startup_event()
     task_sweeper.start()
+    batch_scheduler.start()
     try:
         yield
     finally:
         task_sweeper.stop()
+        batch_scheduler.stop()
         stopped = await asyncio.to_thread(task_sweeper.join, 30.0)
         if not stopped:
             logger.warning("后台任务巡检线程未在 30 秒内停止")
+        batch_stopped = await asyncio.to_thread(batch_scheduler.join, 30.0)
+        if not batch_stopped:
+            logger.warning("批量预案调度线程未在 30 秒内停止")
         await shutdown_event()
 
 
@@ -131,8 +142,8 @@ async def structured_http_error(_request: Request, exc: HTTPException):
 # 配置 CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应该限制具体域名
-    allow_credentials=True,
+    allow_origins=["http://localhost:2001", "http://127.0.0.1:2001"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -143,8 +154,8 @@ app.include_router(router)
 # 本地媒体文件路由。
 # 这里按文件头识别 Content-Type，避免生图接口返回 PNG 但文件名为 .jpg 时被浏览器 ORB 拦截。
 # 支持两个目录：output/（新任务）和 data/media/（旧任务）
-output_dir = Path(__file__).parent / "output"
-legacy_media_dir = Path(__file__).parent / "data" / "media"
+output_dir = Config.BASE_DIR / "output"
+legacy_media_dir = Config.BASE_DIR / "data" / "media"
 output_dir.mkdir(parents=True, exist_ok=True)
 legacy_media_dir.mkdir(parents=True, exist_ok=True)
 
@@ -198,7 +209,6 @@ async def serve_media(file_path: str):
                 media_type=_media_type_for_file(requested),
                 headers={
                     "Cache-Control": "public, max-age=31536000, immutable",
-                    "Access-Control-Allow-Origin": "*",
                 },
             )
 
@@ -224,4 +234,4 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=2002)
+    uvicorn.run(app, host="127.0.0.1", port=2002)

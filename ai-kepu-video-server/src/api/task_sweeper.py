@@ -40,6 +40,7 @@ class SweepResult:
     scanned_tasks: int = 0
     interrupted_tasks: int = 0
     interrupted_operations: int = 0
+    reconciled_tasks: int = 0
     errors: int = 0
 
 
@@ -139,6 +140,7 @@ class TaskSweeper:
             offset += len(page)
         interrupted_tasks = 0
         interrupted_operations = 0
+        reconciled_tasks = 0
         errors = 0
 
         for row in rows:
@@ -146,6 +148,9 @@ class TaskSweeper:
             if not task_id:
                 continue
             try:
+                if self.manager.reconcile_completed_task_data(row):
+                    reconciled_tasks += 1
+                    continue
                 active_operation = self.database.get_active_task_operation(task_id)
                 if active_operation and not self.runtime.is_running(task_id):
                     interrupted = self.database.interrupt_orphaned_task_operation(task_id)
@@ -183,6 +188,7 @@ class TaskSweeper:
             scanned_tasks=len(rows),
             interrupted_tasks=interrupted_tasks,
             interrupted_operations=interrupted_operations,
+            reconciled_tasks=reconciled_tasks,
             errors=errors,
         )
 

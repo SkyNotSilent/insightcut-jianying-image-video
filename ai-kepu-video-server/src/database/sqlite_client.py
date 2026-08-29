@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from src.api.error_model import (
+    ErrorCode,
     normalize_error_code,
     normalize_error_metadata,
     sanitize_persisted_error_text,
@@ -29,14 +30,17 @@ from src.draft.voice_catalog import (
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).parent.parent.parent / "data" / "local.db"
+DB_PATH = Path(
+    os.getenv("INSIGHTCUT_DB_PATH")
+    or Path(__file__).parent.parent.parent / "data" / "local.db"
+).expanduser().resolve()
 
 
 class SQLiteClient:
     """SQLite 数据库客户端"""
 
     TASK_CHECKPOINT_COLUMNS = frozenset({
-        "script_text", "summary", "input_mode", "delete_files_on_delete",
+        "script_text", "script_source", "summary", "input_mode", "delete_files_on_delete",
         "execution_mode", "workflow_phase", "script_policy", "voice_confirmed",
         "error_code", "error_meta_json", "source_draft_id", "template_id",
         "generation_options_json", "subtitle_options_json",
@@ -92,6 +96,8 @@ class SQLiteClient:
                     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
                     updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
                     completed_at TEXT,
+                    exported_at TEXT,
+                    last_export_target TEXT,
                     delete_files_on_delete INTEGER NOT NULL DEFAULT 0
                 );
 
@@ -315,6 +321,13 @@ class SQLiteClient:
                     "input_mode": "TEXT NOT NULL DEFAULT 'script'",
                 },
             )
+            self._apply_column_migration(
+                cursor,
+                "20260829_legacy_script_recovery_source",
+                "tasks",
+                {"script_source": "TEXT"},
+            )
+            self._backfill_legacy_script_text(cursor)
             self._apply_column_migration(
                 cursor,
                 "20260823_global_shell_task_snapshots",
@@ -543,6 +556,60 @@ class SQLiteClient:
                     ON task_operations(task_id, state, updated_at);
                 """,
             )
+            self._apply_migration(
+                cursor,
+                "20260828_batch_planning",
+                """
+                CREATE TABLE IF NOT EXISTS task_batches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    batch_id TEXT NOT NULL UNIQUE,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    concurrency INTEGER NOT NULL DEFAULT 1 CHECK(concurrency BETWEEN 1 AND 3),
+                    config_json TEXT NOT NULL DEFAULT '{}',
+                    total_count INTEGER NOT NULL DEFAULT 0,
+                    cancel_requested INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                    completed_at TEXT
+                );
+                CREATE TABLE IF NOT EXISTS task_batch_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    item_id TEXT NOT NULL UNIQUE,
+                    batch_id TEXT NOT NULL,
+                    position INTEGER NOT NULL,
+                    name TEXT,
+                    theme TEXT NOT NULL,
+                    normalized_theme TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    task_id TEXT,
+                    attempt INTEGER NOT NULL DEFAULT 0,
+                    error TEXT,
+                    error_code TEXT,
+                    error_meta_json TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                    started_at TEXT,
+                    completed_at TEXT,
+                    UNIQUE(batch_id, normalized_theme),
+                    UNIQUE(batch_id, position)
+                );
+                CREATE INDEX IF NOT EXISTS idx_task_batches_status_fifo
+                    ON task_batches(status, created_at, id);
+                CREATE INDEX IF NOT EXISTS idx_task_batch_items_dispatch
+                    ON task_batch_items(status, batch_id, position, id);
+                CREATE INDEX IF NOT EXISTS idx_task_batch_items_task
+                    ON task_batch_items(task_id);
+                """,
+            )
+            self._apply_column_migration(
+                cursor,
+                "20260829_task_export_state",
+                "tasks",
+                {
+                    "exported_at": "TEXT",
+                    "last_export_target": "TEXT",
+                },
+            )
             self._apply_column_migration(
                 cursor,
                 "20260716_tts_task_options",
@@ -735,6 +802,40 @@ class SQLiteClient:
 
         cursor.execute("INSERT INTO schema_migrations (version) VALUES (?)", (version,))
         logger.info(f"SQLite 迁移已应用: {version}")
+
+    def _backfill_legacy_script_text(self, cursor) -> int:
+        """Recover legacy full scripts from preserved segment copy without model calls."""
+        rows = cursor.execute(
+            """SELECT task_id FROM tasks
+               WHERE TRIM(COALESCE(script_text, '')) = ''
+                 AND EXISTS (
+                     SELECT 1 FROM task_segments
+                     WHERE task_segments.task_id = tasks.task_id
+                       AND TRIM(COALESCE(task_segments.text, '')) != ''
+                 )"""
+        ).fetchall()
+        recovered = 0
+        for row in rows:
+            task_id = row[0]
+            segment_rows = cursor.execute(
+                """SELECT text FROM task_segments
+                   WHERE task_id=? AND TRIM(COALESCE(text, '')) != ''
+                   ORDER BY segment_index ASC""",
+                (task_id,),
+            ).fetchall()
+            script_text = "\n".join(str(segment[0]).strip() for segment in segment_rows)
+            if not script_text:
+                continue
+            cursor.execute(
+                """UPDATE tasks
+                   SET script_text=?, script_source='reconstructed_segments'
+                   WHERE task_id=? AND TRIM(COALESCE(script_text, '')) = ''""",
+                (script_text, task_id),
+            )
+            recovered += max(0, cursor.rowcount)
+        if recovered:
+            logger.info("已从分镜恢复 %s 个历史任务的完整文案", recovered)
+        return recovered
 
     @classmethod
     def _safe_structured_error_values(
@@ -1621,9 +1722,11 @@ class SQLiteClient:
                              execution_mode: str = None,
                              workflow_phase: str = None,
                              script_policy: str = None,
-                             voice_confirmed: int = None) -> bool:
+                             voice_confirmed: int = None,
+                             script_source: str = None) -> bool:
         values = {
             "script_text": script_text,
+            "script_source": script_source,
             "summary": summary,
             "input_mode": input_mode,
             "execution_mode": execution_mode,
@@ -1679,7 +1782,7 @@ class SQLiteClient:
         """Atomically update task settings and advance the plan version."""
         allowed = {
             "style", "ratio", "voice_type", "tts_options_json", "voice_confirmed",
-            "script_text", "summary", "workflow_phase", "template_id",
+            "script_text", "script_source", "summary", "workflow_phase", "template_id",
             "generation_options_json", "subtitle_options_json",
         }
         fields = {key: value for key, value in updates.items() if key in allowed}
@@ -1811,7 +1914,8 @@ class SQLiteClient:
                 )
             next_version = current + 1
             cur.execute(
-                """UPDATE tasks SET script_text=?, plan_version=?, workflow_phase='planning',
+                """UPDATE tasks SET script_text=?, script_source='user_edited',
+                   plan_version=?, workflow_phase='planning',
                    status='interrupted', current_step='image_prompt_generation', error=NULL,
                    updated_at=datetime('now','localtime') WHERE task_id=?""",
                 (script_text, next_version, task_id),
@@ -1855,6 +1959,88 @@ class SQLiteClient:
             return True
         except Exception as e:
             logger.error(f"保存任务结果失败: {e}")
+            return False
+
+    def complete_task_with_result(
+        self,
+        task_id: str,
+        draft_path: str,
+        segments_count: int,
+        *,
+        draft_url: str = None,
+        video_url: str = None,
+        total_duration: float = None,
+        workflow_phase: str = "ready",
+    ) -> bool:
+        """Atomically publish a validated result and clear any historical error."""
+        if not self._initialized:
+            self._init_db()
+        if not self._initialized:
+            return False
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            cur.execute(
+                """INSERT INTO task_results
+                   (task_id, draft_path, draft_url, video_url, segments_count, total_duration)
+                   VALUES (?,?,?,?,?,?)
+                   ON CONFLICT(task_id) DO UPDATE SET
+                   draft_path=excluded.draft_path, draft_url=excluded.draft_url,
+                   video_url=excluded.video_url, segments_count=excluded.segments_count,
+                   total_duration=excluded.total_duration""",
+                (
+                    task_id,
+                    draft_path,
+                    draft_url,
+                    video_url,
+                    int(segments_count or 0),
+                    total_duration,
+                ),
+            )
+            cur.execute(
+                """UPDATE tasks
+                   SET status='completed', workflow_phase=?, current_step='completed',
+                       error=NULL, error_code=NULL, error_meta_json=NULL,
+                       exported_at=NULL, last_export_target=NULL,
+                       completed_at=datetime('now','localtime'),
+                       updated_at=datetime('now','localtime')
+                   WHERE task_id=? AND status != 'deleting'""",
+                (workflow_phase, task_id),
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                return False
+            conn.commit()
+            return True
+        except Exception as exc:
+            conn.rollback()
+            logger.error(f"原子完成任务失败: {exc}")
+            return False
+        finally:
+            conn.close()
+
+    def mark_task_exported(self, task_id: str, target: str) -> bool:
+        """Persist that a user-requested export completed successfully."""
+        if not self._initialized:
+            self._init_db()
+        if not self._initialized:
+            return False
+        try:
+            with self.get_connection() as conn:
+                if not conn:
+                    return False
+                cur = conn.execute(
+                    """UPDATE tasks
+                       SET exported_at=datetime('now','localtime'),
+                           last_export_target=?, updated_at=datetime('now','localtime')
+                       WHERE task_id=? AND status='completed'""",
+                    (str(target or "export"), task_id),
+                )
+                conn.commit()
+                return cur.rowcount == 1
+        except Exception as exc:
+            logger.error("记录任务导出状态失败: %s", exc)
             return False
 
     def clear_task_result(self, task_id: str) -> bool:
@@ -2203,7 +2389,7 @@ class SQLiteClient:
             cur = conn.cursor()
             if status:
                 cur.execute(
-                    """SELECT t.*, r.draft_url, r.video_url, r.segments_count,
+                    """SELECT t.*, r.draft_path, r.draft_url, r.video_url, r.segments_count,
                               (
                                 SELECT s.image_url
                                 FROM task_segments s
@@ -2228,7 +2414,7 @@ class SQLiteClient:
                 )
             else:
                 cur.execute(
-                    """SELECT t.*, r.draft_url, r.video_url, r.segments_count,
+                    """SELECT t.*, r.draft_path, r.draft_url, r.video_url, r.segments_count,
                               (
                                 SELECT s.image_url
                                 FROM task_segments s
@@ -2712,14 +2898,423 @@ class SQLiteClient:
             conn.commit()
             return cur.rowcount > 0
 
-    def list_task_activity(self, limit: int = 20) -> List[Dict]:
-        """Return task activity with progress in one SQL round trip."""
+    @staticmethod
+    def _decode_batch_row(row) -> Dict:
+        if not row:
+            return {}
+        data = dict(row)
+        try:
+            data["config"] = json.loads(data.pop("config_json", "{}") or "{}")
+        except (TypeError, ValueError):
+            data["config"] = {}
+        data["cancel_requested"] = bool(data.get("cancel_requested"))
+        return data
+
+    @classmethod
+    def _decode_batch_item_row(cls, row) -> Dict:
+        if not row:
+            return {}
+        data = dict(row)
+        raw_meta = data.pop("error_meta_json", None)
+        if raw_meta:
+            try:
+                raw_meta = json.loads(raw_meta)
+            except (TypeError, ValueError):
+                raw_meta = None
+        if data.get("error") or data.get("error_code") or raw_meta:
+            code = normalize_error_code(data.get("error_code"), has_error=True)
+            data["error_code"] = (code or ErrorCode.UNKNOWN).value
+            data["error_meta"] = normalize_error_metadata(
+                data["error_code"], raw_meta
+            )
+            data["error"] = data["error_meta"]["safe_message"]
+        else:
+            data["error_meta"] = None
+        return data
+
+    @staticmethod
+    def _refresh_batch_status_cursor(cur, batch_id: str) -> None:
+        batch = cur.execute(
+            "SELECT cancel_requested FROM task_batches WHERE batch_id=?",
+            (batch_id,),
+        ).fetchone()
+        if not batch:
+            return
+        counts = {
+            row["status"]: int(row["count"])
+            for row in cur.execute(
+                """SELECT status, COUNT(*) AS count FROM task_batch_items
+                   WHERE batch_id=? GROUP BY status""",
+                (batch_id,),
+            ).fetchall()
+        }
+        queued = counts.get("queued", 0)
+        running = counts.get("running", 0)
+        failed = counts.get("failed", 0)
+        awaiting = counts.get("awaiting_confirmation", 0)
+        cancelled = counts.get("cancelled", 0)
+        total = sum(counts.values())
+        cancel_requested = bool(batch["cancel_requested"])
+        completed = False
+        if running:
+            status = "running"
+        elif queued:
+            status = "queued"
+        elif cancel_requested:
+            status = "cancelled"
+            completed = True
+        elif total and awaiting == total:
+            status = "completed"
+            completed = True
+        elif failed or cancelled:
+            status = "completed_with_errors"
+            completed = True
+        else:
+            status = "queued"
+        cur.execute(
+            """UPDATE task_batches SET status=?,
+               completed_at=CASE WHEN ? THEN datetime('now','localtime') ELSE NULL END,
+               updated_at=datetime('now','localtime') WHERE batch_id=?""",
+            (status, int(completed), batch_id),
+        )
+
+    def create_batch(
+        self,
+        batch_id: str,
+        items: List[Dict],
+        config: Dict,
+        concurrency: int,
+    ) -> Dict:
+        if not self._initialized:
+            self._init_db()
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            cur.execute(
+                """INSERT INTO task_batches
+                   (batch_id, status, concurrency, config_json, total_count)
+                   VALUES (?, 'queued', ?, ?, ?)""",
+                (
+                    batch_id,
+                    int(concurrency),
+                    json.dumps(config or {}, ensure_ascii=False),
+                    len(items),
+                ),
+            )
+            for position, item in enumerate(items):
+                cur.execute(
+                    """INSERT INTO task_batch_items
+                       (item_id, batch_id, position, name, theme, normalized_theme)
+                       VALUES (?,?,?,?,?,?)""",
+                    (
+                        item["item_id"],
+                        batch_id,
+                        position,
+                        item.get("name"),
+                        item["theme"],
+                        item["normalized_theme"],
+                    ),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return self.get_batch(batch_id)
+
+    def list_batches(self, limit: int = 50, offset: int = 0) -> List[Dict]:
+        if not self._initialized:
+            self._init_db()
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                """SELECT b.*,
+                          SUM(CASE WHEN i.status='queued' THEN 1 ELSE 0 END) AS queued_count,
+                          SUM(CASE WHEN i.status='running' THEN 1 ELSE 0 END) AS running_count,
+                          SUM(CASE WHEN i.status='awaiting_confirmation' THEN 1 ELSE 0 END) AS awaiting_confirmation_count,
+                          SUM(CASE WHEN i.status='failed' THEN 1 ELSE 0 END) AS failed_count,
+                          SUM(CASE WHEN i.status='cancelled' THEN 1 ELSE 0 END) AS cancelled_count
+                   FROM task_batches b
+                   LEFT JOIN task_batch_items i ON i.batch_id=b.batch_id
+                   GROUP BY b.batch_id
+                   ORDER BY b.created_at DESC, b.id DESC LIMIT ? OFFSET ?""",
+                (max(1, min(200, int(limit))), max(0, int(offset))),
+            ).fetchall()
+            return [self._decode_batch_row(row) for row in rows]
+        finally:
+            conn.close()
+
+    def get_batch(self, batch_id: str) -> Dict:
+        if not self._initialized:
+            self._init_db()
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT * FROM task_batches WHERE batch_id=?", (batch_id,)
+            ).fetchone()
+            batch = self._decode_batch_row(row)
+            if not batch:
+                return {}
+            item_rows = conn.execute(
+                """SELECT * FROM task_batch_items WHERE batch_id=?
+                   ORDER BY position ASC, id ASC""",
+                (batch_id,),
+            ).fetchall()
+            batch["items"] = [self._decode_batch_item_row(item) for item in item_rows]
+            counts = {status: 0 for status in (
+                "queued", "running", "awaiting_confirmation", "failed", "cancelled"
+            )}
+            for item in batch["items"]:
+                counts[item["status"]] = counts.get(item["status"], 0) + 1
+            batch["counts"] = counts
+            return batch
+        finally:
+            conn.close()
+
+    def get_batch_item(self, item_id: str) -> Dict:
+        if not self._initialized:
+            self._init_db()
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                """SELECT i.*, b.cancel_requested, b.config_json, b.concurrency
+                   FROM task_batch_items i JOIN task_batches b ON b.batch_id=i.batch_id
+                   WHERE i.item_id=?""",
+                (item_id,),
+            ).fetchone()
+            data = self._decode_batch_item_row(row)
+            if data:
+                try:
+                    data["config"] = json.loads(data.pop("config_json", "{}") or "{}")
+                except (TypeError, ValueError):
+                    data["config"] = {}
+                data["cancel_requested"] = bool(data.get("cancel_requested"))
+            return data
+        finally:
+            conn.close()
+
+    def claim_next_batch_item(self) -> Dict:
+        if not self._initialized:
+            self._init_db()
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            row = cur.execute(
+                """SELECT i.item_id, i.batch_id
+                   FROM task_batch_items i
+                   JOIN task_batches b ON b.batch_id=i.batch_id
+                   WHERE i.status='queued' AND b.cancel_requested=0
+                     AND (SELECT COUNT(*) FROM task_batch_items active
+                          WHERE active.batch_id=i.batch_id AND active.status='running') < b.concurrency
+                   ORDER BY b.created_at ASC, b.id ASC, i.position ASC, i.id ASC
+                   LIMIT 1"""
+            ).fetchone()
+            if not row:
+                conn.commit()
+                return {}
+            cur.execute(
+                """UPDATE task_batch_items SET status='running', attempt=attempt+1,
+                   started_at=datetime('now','localtime'), completed_at=NULL,
+                   updated_at=datetime('now','localtime')
+                   WHERE item_id=? AND status='queued'""",
+                (row["item_id"],),
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                return {}
+            self._refresh_batch_status_cursor(cur, row["batch_id"])
+            conn.commit()
+            return self.get_batch_item(row["item_id"])
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def set_batch_item_task(self, item_id: str, task_id: str) -> bool:
+        if not self._initialized:
+            self._init_db()
+        conn = self._get_conn()
+        try:
+            cur = conn.execute(
+                """UPDATE task_batch_items SET task_id=?, updated_at=datetime('now','localtime')
+                   WHERE item_id=? AND status='running'""",
+                (task_id, item_id),
+            )
+            conn.commit()
+            return cur.rowcount == 1
+        finally:
+            conn.close()
+
+    def update_batch_item_status(
+        self,
+        item_id: str,
+        status: str,
+        *,
+        error: str = None,
+        error_code: str = None,
+        error_meta: Dict = None,
+    ) -> bool:
+        allowed = {"queued", "running", "awaiting_confirmation", "failed", "cancelled"}
+        if status not in allowed:
+            raise ValueError("批次项目状态无效")
+        if not self._initialized:
+            self._init_db()
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            row = cur.execute(
+                "SELECT batch_id FROM task_batch_items WHERE item_id=?", (item_id,)
+            ).fetchone()
+            if not row:
+                conn.rollback()
+                return False
+            safe_error, encoded_code, encoded_meta = self._encode_error_record(
+                error, error_code, error_meta
+            )
+            terminal = status in {"awaiting_confirmation", "failed", "cancelled"}
+            cur.execute(
+                """UPDATE task_batch_items SET status=?, error=?, error_code=?,
+                   error_meta_json=?,
+                   completed_at=CASE WHEN ? THEN datetime('now','localtime') ELSE NULL END,
+                   updated_at=datetime('now','localtime') WHERE item_id=?""",
+                (
+                    status,
+                    safe_error if safe_error is not None else error,
+                    encoded_code,
+                    encoded_meta,
+                    int(terminal),
+                    item_id,
+                ),
+            )
+            self._refresh_batch_status_cursor(cur, row["batch_id"])
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def cancel_batch(self, batch_id: str) -> Dict:
+        if not self._initialized:
+            self._init_db()
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            cur.execute(
+                """UPDATE task_batches SET cancel_requested=1,
+                   updated_at=datetime('now','localtime') WHERE batch_id=?""",
+                (batch_id,),
+            )
+            if cur.rowcount != 1:
+                conn.rollback()
+                return {}
+            running = [
+                dict(row) for row in cur.execute(
+                    """SELECT item_id, task_id FROM task_batch_items
+                       WHERE batch_id=? AND status='running'""",
+                    (batch_id,),
+                ).fetchall()
+            ]
+            cur.execute(
+                """UPDATE task_batch_items SET status='cancelled',
+                   completed_at=datetime('now','localtime'),
+                   updated_at=datetime('now','localtime')
+                   WHERE batch_id=? AND status='queued'""",
+                (batch_id,),
+            )
+            self._refresh_batch_status_cursor(cur, batch_id)
+            conn.commit()
+            return {"batch_id": batch_id, "running": running}
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def retry_failed_batch_items(self, batch_id: str) -> int:
+        if not self._initialized:
+            self._init_db()
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            batch = cur.execute(
+                "SELECT cancel_requested FROM task_batches WHERE batch_id=?", (batch_id,)
+            ).fetchone()
+            if not batch:
+                conn.rollback()
+                return -1
+            if batch["cancel_requested"]:
+                conn.rollback()
+                return -2
+            cur.execute(
+                """UPDATE task_batch_items SET status='queued', error=NULL,
+                   error_code=NULL, error_meta_json=NULL, completed_at=NULL,
+                   updated_at=datetime('now','localtime')
+                   WHERE batch_id=? AND status='failed'""",
+                (batch_id,),
+            )
+            count = cur.rowcount
+            self._refresh_batch_status_cursor(cur, batch_id)
+            conn.commit()
+            return count
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def recover_batch_items(self) -> int:
+        """Requeue persisted running items; their existing task_id is retained."""
+        if not self._initialized:
+            self._init_db()
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            batches = [
+                row["batch_id"] for row in cur.execute(
+                    "SELECT DISTINCT batch_id FROM task_batch_items WHERE status='running'"
+                ).fetchall()
+            ]
+            cur.execute(
+                """UPDATE task_batch_items SET status=CASE
+                       WHEN batch_id IN (SELECT batch_id FROM task_batches WHERE cancel_requested=1)
+                       THEN 'cancelled' ELSE 'queued' END,
+                   updated_at=datetime('now','localtime') WHERE status='running'"""
+            )
+            count = cur.rowcount
+            for batch_id in batches:
+                self._refresh_batch_status_cursor(cur, batch_id)
+            conn.commit()
+            return count
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def list_task_activity(self, limit: int = 10) -> List[Dict]:
+        """Return every incomplete task, then export-ready tasks completed in the last 30 days."""
         with self.get_connection() as conn:
             if not conn:
                 return []
+            incomplete_count = int(conn.execute(
+                """SELECT COUNT(*) FROM tasks
+                   WHERE status NOT IN ('completed', 'cancelled', 'deleting')"""
+            ).fetchone()[0])
+            effective_limit = max(int(limit or 0), incomplete_count)
             rows = conn.execute(
                 """SELECT t.*,
                           COUNT(s.id) AS segments_total,
+                          SUM(CASE WHEN TRIM(COALESCE(s.image_prompt, '')) != '' THEN 1 ELSE 0 END) AS prompts_ready,
                           SUM(CASE WHEN s.image_status IN ('completed','stale') THEN 1 ELSE 0 END) AS images_ready,
                           SUM(CASE WHEN s.audio_status IN ('completed','stale') THEN 1 ELSE 0 END) AS audio_ready,
                           o.operation_id, o.kind AS operation_kind, o.state AS operation_state,
@@ -2731,10 +3326,22 @@ class SQLiteClient:
                        WHERE oo.task_id=t.task_id AND oo.state IN ('pending','running')
                        ORDER BY oo.id DESC LIMIT 1
                    )
-                   WHERE t.status != 'deleting'
+                   WHERE t.status NOT IN ('cancelled', 'deleting')
+                     AND (
+                         t.status != 'completed'
+                         OR (
+                             t.exported_at IS NULL
+                             AND t.completed_at IS NOT NULL
+                             AND t.completed_at >= datetime('now','localtime','-30 days')
+                         )
+                     )
                    GROUP BY t.task_id
-                   ORDER BY t.updated_at DESC LIMIT ?""",
-                (limit,),
+                   ORDER BY CASE WHEN t.status='completed' THEN 1 ELSE 0 END,
+                            CASE WHEN t.status!='completed' THEN t.updated_at END DESC,
+                            CASE WHEN t.status='completed' THEN t.completed_at END DESC,
+                            t.id DESC
+                   LIMIT ?""",
+                (effective_limit,),
             ).fetchall()
             return [self._decode_task_error(dict(row)) for row in rows]
 

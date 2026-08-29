@@ -230,3 +230,58 @@ def test_non_retryable_bad_request_is_not_replayed(tmp_path, monkeypatch):
     assert len(calls) == 1
     assert exc_info.value.safe_error.code.value == "provider_error"
     assert exc_info.value.safe_error.retryable is False
+
+
+def test_agnes_text_to_image_payload_uses_supported_shape(tmp_path, monkeypatch):
+    calls = []
+
+    class SuccessResponse:
+        status_code = 200
+        headers = {}
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "data": [{
+                    "b64_json": base64.b64encode(
+                        b"\x89PNG\r\n\x1a\nagnes-payload"
+                    ).decode()
+                }]
+            }
+
+    monkeypatch.setattr(
+        Config,
+        "image_config",
+        classmethod(lambda cls: {
+            "api_url": "https://apihub.agnes-ai.com/v1/images/generations",
+            "api_key": "safe-test-key",
+            "model": "agnes-image-2.1-flash",
+            "size": "auto",
+        }),
+    )
+    monkeypatch.setattr(
+        Config,
+        "generation_config",
+        classmethod(lambda cls: {"retry_count": 0, "retry_interval_seconds": 1}),
+    )
+
+    def fake_post(_url, *, headers, json, timeout):
+        calls.append(dict(json))
+        return SuccessResponse()
+
+    monkeypatch.setattr(image_generator.requests, "post", fake_post)
+    monkeypatch.setattr(ImageGenerator, "_wait_for_rate_limit", lambda self: None)
+
+    ImageGenerator(str(tmp_path)).generate(
+        "safe prompt", width=1920, height=1080
+    )
+
+    assert calls == [{
+        "model": "agnes-image-2.1-flash",
+        "prompt": "safe prompt, photorealistic, cinematic lighting, 4k, high detail",
+        "n": 1,
+        "size": "1024x576",
+        "extra_body": {"response_format": "url"},
+    }]

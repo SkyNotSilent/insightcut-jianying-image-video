@@ -82,6 +82,27 @@ class CreateTaskRequest(BaseModel):
     subtitle_options: Optional[SubtitleOptions] = None
 
 
+class BatchItemRequest(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    theme: str = Field(..., min_length=1, max_length=100)
+
+
+class CreateBatchRequest(BaseModel):
+    """Create 2-50 review-first projects sharing one production preset."""
+
+    items: List[BatchItemRequest] = Field(..., min_length=2, max_length=50)
+    concurrency: int = Field(1, ge=1, le=3)
+    style: str = Field(default="温暖感人")
+    ratio: str = Field(default="16:9")
+    length: int = Field(default=300, ge=0, le=2000)
+    voice_type: Optional[str] = None
+    tts_options: Optional[TTSOptions] = None
+    script_policy: Literal["rewrite", "verbatim"] = "rewrite"
+    template_id: Optional[str] = Field(None, max_length=64)
+    generation_options: Optional[GenerationOptions] = None
+    subtitle_options: Optional[SubtitleOptions] = None
+
+
 class CreateTaskFromImagesRequest(BaseModel):
     """从本地图片创建任务请求"""
     style: Optional[str] = Field(default="温暖感人", description="文章风格|画面风格")

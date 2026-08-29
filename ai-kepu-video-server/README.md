@@ -32,7 +32,7 @@ cp .env.example .env
 python api_server.py
 ```
 
-默认服务地址：`http://localhost:2002`
+需要 Python 3.10+。服务默认仅绑定本机 `127.0.0.1:2002`，访问地址：`http://localhost:2002`
 
 API 文档：`http://localhost:2002/docs`
 

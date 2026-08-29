@@ -49,7 +49,9 @@ def _clamp_int(value, default: int, minimum: int, maximum: int) -> int:
 class Config:
     """配置类 - 默认配置 + data/config.json 运行时覆盖"""
 
-    BASE_DIR: Path = Path(__file__).resolve().parent.parent
+    BASE_DIR: Path = Path(
+        os.getenv("INSIGHTCUT_DATA_ROOT") or Path(__file__).resolve().parent.parent
+    ).expanduser().resolve()
 
     # LLM 配置。真实 key 请写入 .env、环境变量，或通过前端“模型配置”页保存到 data/config.json。
     LLM_PROVIDER: str = _env("LLM_PROVIDER", "")

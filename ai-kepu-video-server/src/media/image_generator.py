@@ -124,12 +124,12 @@ class ImageGenerator:
         payload = {
             "model": self.model,
             "prompt": full_prompt,
+            "n": 1,
             "size": size,
         }
         if not self._is_openai_official_endpoint():
             # Agnes 等中转/兼容接口要求 response_format 放在 extra_body 中。
             payload["extra_body"] = {"response_format": "url"}
-            payload["stream"] = False
 
         resp = None
         attempt = 0
@@ -266,6 +266,12 @@ class ImageGenerator:
         parsed = urlparse(self.api_url)
         return parsed.netloc in {"api.openai.com", "api.openai.com:443"}
 
+    def _is_agnes_endpoint(self) -> bool:
+        return urlparse(self.api_url).netloc in {
+            "apihub.agnes-ai.com",
+            "apihub.agnes-ai.com:443",
+        }
+
     def _wait_for_rate_limit(self) -> None:
         with _RATE_LIMIT_LOCK:
             while True:
@@ -338,6 +344,12 @@ class ImageGenerator:
 
         ratio = width / height
         model = (self.model or "").lower()
+        if self._is_agnes_endpoint():
+            if ratio >= 1.6:
+                return "1024x576"
+            if ratio <= 0.65:
+                return "576x1024"
+            return "1024x1024"
         if "dall-e-3" in model or "dalle-3" in model:
             if ratio >= 1.6:
                 return "1792x1024"

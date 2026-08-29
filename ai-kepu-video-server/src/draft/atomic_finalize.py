@@ -116,6 +116,11 @@ def validate_staged_draft(draft_dir: Path) -> None:
     content = json.loads(content_path.read_text(encoding="utf-8"))
     if not content.get("tracks"):
         raise ValueError("草稿构建不完整，没有轨道数据")
+    video_tracks = [
+        track for track in content.get("tracks", []) if track.get("type") == "video"
+    ]
+    if not video_tracks or not any(track.get("segments") for track in video_tracks):
+        raise ValueError("草稿构建不完整，视频轨道为空")
     for group in ("videos", "audios"):
         for material in (content.get("materials") or {}).get(group, []):
             raw_path = str(material.get("path") or "").strip()

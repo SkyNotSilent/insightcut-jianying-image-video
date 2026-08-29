@@ -4,6 +4,7 @@ const installedBrowserChannel = process.env.PLAYWRIGHT_BROWSER_CHANNEL
 
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: '**/real-fullstack.spec.js',
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,

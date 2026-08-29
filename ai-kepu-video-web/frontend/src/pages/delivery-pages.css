@@ -1411,3 +1411,8 @@
   .project-step-bar { overflow-x: auto; }
   .project-step-bar ol { min-width: 680px; }
 }
+.export-open-option { width: max-content; max-width: 100%; display: flex; align-items: center; gap: 10px; margin: 12px 0 18px auto; padding: 9px 12px; color: var(--color-ink); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); cursor: pointer; }
+.export-open-option input { accent-color: var(--color-accent); }
+.export-open-option span { display: grid; gap: 2px; }
+.export-open-option strong { font-size: 12px; }
+.export-open-option small { color: var(--color-ink-muted); font-size: 10px; }

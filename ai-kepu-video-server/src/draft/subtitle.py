@@ -1,100 +1,87 @@
-"""
-字幕生成模块
-基于 ASR 生成字幕
-"""
+"""Deterministic script-based subtitle rendering for delivery surfaces."""
 
-import logging
-from typing import Optional
+from __future__ import annotations
+
+import os
+import tempfile
 from pathlib import Path
+from typing import Iterable
 
-logger = logging.getLogger(__name__)
+from src.utils.subtitle_text import normalize_subtitle_text
 
 
-class SubtitleGenerator:
-    """字幕生成器 - 基于 ASR 生成字幕"""
-    
-    def __init__(self, output_dir: str = "output/subtitles"):
-        """
-        初始化字幕生成器
-        
-        Args:
-            output_dir: 输出目录
-        """
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-    
-    def generate(self, audio_path: str, 
-                lang: str = "zh") -> str:
-        """
-        生成字幕
-        
-        Args:
-            audio_path: 音频文件路径
-            lang: 语言
-            
-        Returns:
-            字幕文件路径
-        """
-        logger.info(f"开始生成字幕: 音频={audio_path}")
-        
+class SubtitleWriter:
+    """Render ordered storyboard text as SRT or WebVTT and publish atomically."""
+
+    SUPPORTED_FORMATS = {"srt", "vtt"}
+
+    def __init__(self, default_duration: float = 4.0):
+        self.default_duration = max(0.001, float(default_duration))
+
+    def _duration(self, segment: dict) -> float:
+        value = segment.get("duration")
+        if value in (None, ""):
+            value = segment.get("duration_seconds")
         try:
-            # 调用 ASR API
-            subtitle_text = self._call_asr_api(audio_path, lang)
-            
-            # 保存字幕文件
-            subtitle_path = self._save_subtitle(subtitle_text, audio_path)
-            
-            logger.info(f"字幕生成成功: {subtitle_path}")
-            return str(subtitle_path)
-            
-        except Exception as e:
-            logger.error(f"字幕生成失败: {e}")
+            duration = float(value or 0)
+        except (TypeError, ValueError):
+            duration = 0
+        return duration if duration > 0 else self.default_duration
+
+    @staticmethod
+    def _timestamp(seconds: float, separator: str) -> str:
+        millis = int(max(0.0, float(seconds)) * 1000)
+        hours, millis = divmod(millis, 3_600_000)
+        minutes, millis = divmod(millis, 60_000)
+        secs, millis = divmod(millis, 1000)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}{separator}{millis:03d}"
+
+    @staticmethod
+    def _ordered(segments: Iterable[dict]):
+        return sorted(
+            (dict(segment) for segment in (segments or [])),
+            key=lambda segment: int(segment.get("segment_index") or 0),
+        )
+
+    def render(self, segments: Iterable[dict], format: str = "srt") -> str:
+        format = str(format or "srt").lower()
+        if format not in self.SUPPORTED_FORMATS:
+            raise ValueError("字幕格式必须是 srt 或 vtt")
+        separator = "," if format == "srt" else "."
+        cursor = 0.0
+        blocks = []
+        for index, segment in enumerate(self._ordered(segments), start=1):
+            start = cursor
+            cursor += self._duration(segment)
+            text = normalize_subtitle_text(segment.get("text") or "")
+            blocks.append(
+                f"{index}\n"
+                f"{self._timestamp(start, separator)} --> "
+                f"{self._timestamp(cursor, separator)}\n{text}\n"
+            )
+        body = "\n".join(blocks)
+        return f"WEBVTT\n\n{body}" if format == "vtt" else body
+
+    def write(self, path, segments: Iterable[dict], format: str = "srt") -> Path:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(self.render(segments, format))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, target)
+        except Exception:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            Path(temporary).unlink(missing_ok=True)
             raise
-    
-    def _call_asr_api(self, audio_path: str, lang: str) -> str:
-        """
-        调用 ASR API（需要实现）
-        
-        Args:
-            audio_path: 音频路径
-            lang: 语言
-            
-        Returns:
-            字幕文本
-        """
-        # TODO: 实现具体的 ASR API 调用逻辑
-        # 支持的 API:
-        # 1. Whisper (开源免费)
-        # 2. Edge ASR (免费)
-        # 3. Google ASR (付费)
-        # 4. 本地 ASR
-        
-        raise NotImplementedError("请实现具体的 ASR API 调用逻辑")
-    
-    def _save_subtitle(self, text: str, audio_path: str) -> Path:
-        """
-        保存字幕文件（需要实现）
-        
-        Args:
-            text: 字幕文本
-            audio_path: 音频路径
-            
-        Returns:
-            字幕文件路径
-        """
-        # TODO: 实现字幕文件保存逻辑
-        # 支持的格式:
-        # 1. SRT
-        # 2. VTT
-        # 3. ASS
-        
-        raise NotImplementedError("请实现字幕文件保存逻辑")
+        return target
 
 
-if __name__ == "__main__":
-    # 测试代码
-    generator = SubtitleGenerator()
-    
-    # 示例
-    # subtitle_path = generator.generate("audio.mp3")
-    # print(f"字幕已保存到: {subtitle_path}")
+__all__ = ["SubtitleWriter"]

@@ -188,6 +188,32 @@ export function createTask(data) {
   })
 }
 
+export function createBatch(data) {
+  return request({ url: '/ai/native/video/kepu/batches', method: 'post', data })
+}
+
+export function listBatches(params = {}, { signal } = {}) {
+  return request({
+    url: '/ai/native/video/kepu/batches', method: 'get', params,
+    suppressToast: true, signal,
+  })
+}
+
+export function getBatch(batchId, { signal, silent = true } = {}) {
+  return request({
+    url: `/ai/native/video/kepu/batches/${batchId}`, method: 'get',
+    suppressToast: silent, signal,
+  })
+}
+
+export function cancelBatch(batchId) {
+  return request({ url: `/ai/native/video/kepu/batches/${batchId}/cancel`, method: 'post' })
+}
+
+export function retryFailedBatchItems(batchId) {
+  return request({ url: `/ai/native/video/kepu/batches/${batchId}/retry-failed`, method: 'post' })
+}
+
 /**
  * 使用本地上传图片创建可编辑任务
  * @param {FormData} formData - images/style/voice_type/name

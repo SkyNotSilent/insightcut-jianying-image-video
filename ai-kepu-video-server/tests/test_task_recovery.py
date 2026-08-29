@@ -73,13 +73,18 @@ class FakePromptAgent:
 
 
 class ConcurrentPromptAgent:
-    def __init__(self, fail_text=None, delay=0.02):
+    def __init__(self, fail_text=None, delay=0.02, expected_concurrency=None):
         self.fail_text = fail_text
         self.delay = delay
         self.calls = []
         self.active = 0
         self.max_active = 0
         self.lock = threading.Lock()
+        self.start_barrier = (
+            threading.Barrier(expected_concurrency)
+            if expected_concurrency
+            else None
+        )
 
     def generate_prompt(self, **kwargs):
         segment_text = kwargs["segment_text"]
@@ -88,6 +93,11 @@ class ConcurrentPromptAgent:
             self.active += 1
             self.max_active = max(self.max_active, self.active)
         try:
+            if self.start_barrier:
+                try:
+                    self.start_barrier.wait(timeout=2)
+                except threading.BrokenBarrierError:
+                    pass
             time.sleep(self.delay)
             if segment_text == self.fail_text:
                 raise RuntimeError("prompt failed")
@@ -164,7 +174,14 @@ class FakeDraftBuilder:
         (output_dir / "draft_content.json").write_text(
             json.dumps(
                 {
-                    "tracks": [{"id": "track-1"}],
+                    "tracks": [{
+                        "id": "track-1",
+                        "type": "video",
+                        "segments": [
+                            {"target_timerange": {"start": index, "duration": 1}}
+                            for index, _path in enumerate(media_paths)
+                        ],
+                    }],
                     "materials": {
                         "videos": [{"path": path} for path in media_paths],
                         "audios": [{"path": path} for path in audio_paths],
@@ -425,6 +442,32 @@ def test_checkpoint_migration_recovers_from_partial_column_application(
         ).fetchone()
     assert {"script_text", "summary", "input_mode"}.issubset(columns)
     assert marker["version"] == "20260711_task_recovery_checkpoints"
+
+
+def test_legacy_script_backfill_is_ordered_idempotent_and_preserves_canonical_text(
+    temp_db
+):
+    temp_db.create_task("legacy", "旧任务", "知识科普|电影质感", 100)
+    temp_db.save_segments("legacy", [
+        {"segment_index": 9, "text": "第二段。"},
+        {"segment_index": 3, "text": "第一段。"},
+    ])
+    temp_db.create_task("canonical", "新任务", "知识科普|电影质感", 100)
+    temp_db.save_task_checkpoint("canonical", script_text="已保存的原稿。")
+    temp_db.save_segments("canonical", [
+        {"segment_index": 0, "text": "不能覆盖原稿。"},
+    ])
+
+    with temp_db.get_connection() as connection:
+        first = temp_db._backfill_legacy_script_text(connection.cursor())
+        second = temp_db._backfill_legacy_script_text(connection.cursor())
+
+    assert first == 1
+    assert second == 0
+    assert temp_db.get_task("legacy")["script_text"] == "第一段。\n第二段。"
+    assert temp_db.get_task("legacy")["script_source"] == "reconstructed_segments"
+    assert temp_db.get_task("canonical")["script_text"] == "已保存的原稿。"
+    assert temp_db.get_task("canonical")["script_source"] is None
 
 
 def test_segment_checkpoint_updates_only_allowed_fields(temp_db):
@@ -2109,6 +2152,7 @@ def test_segments_only_legacy_resume_reconstructs_script_without_rewrite(
     assert pipeline.article == "第一段\n第二段"
     assert pipeline.summary == "已有摘要"
     assert task["script_text"] == "第一段\n第二段"
+    assert task["script_source"] == "reconstructed_segments"
     assert task["summary"] == "已有摘要"
 
 
@@ -2213,7 +2257,7 @@ def test_prompt_generation_uses_configured_bounded_concurrency(
     )
     pipeline = FakePipeline(output_dir=str(tmp_path / "prompt-concurrency"))
     pipeline.text_segmenter.split = lambda article: [f"第{i}段" for i in range(8)]
-    pipeline.image_prompt_agent = ConcurrentPromptAgent()
+    pipeline.image_prompt_agent = ConcurrentPromptAgent(expected_concurrency=4)
     monkeypatch.setattr(
         task_executor_module.Config,
         "generation_config",

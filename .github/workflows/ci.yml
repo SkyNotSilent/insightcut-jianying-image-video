@@ -8,26 +8,32 @@ on:
 
 jobs:
   backend:
-    name: Backend compile
+    name: Backend tests and audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: "3.11"
           cache: "pip"
           cache-dependency-path: ai-kepu-video-server/requirements.txt
       - name: Install backend dependencies
         working-directory: ai-kepu-video-server
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
       - name: Compile backend
         working-directory: ai-kepu-video-server
         run: python -m compileall src api_server.py
+      - name: Test backend
+        working-directory: ai-kepu-video-server
+        run: pytest -q
+      - name: Audit backend dependencies
+        working-directory: ai-kepu-video-server
+        run: pip-audit -r requirements.txt
 
   frontend:
-    name: Frontend build
+    name: Frontend tests, build and audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +48,43 @@ jobs:
       - name: Build frontend
         working-directory: ai-kepu-video-web/frontend
         run: npm run build
+      - name: Test frontend
+        working-directory: ai-kepu-video-web/frontend
+        run: npm run test:all
+      - name: Audit frontend dependencies
+        working-directory: ai-kepu-video-web/frontend
+        run: npm audit --audit-level=high
+
+  full-stack-e2e:
+    name: Real full-stack Playwright
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: ai-kepu-video-server/requirements.txt
+      - name: Install backend dependencies
+        working-directory: ai-kepu-video-server
+        run: pip install -r requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ai-kepu-video-web/frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: ai-kepu-video-web/frontend
+        run: npm ci
+      - name: Install Chromium
+        working-directory: ai-kepu-video-web/frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run frontend browser E2E
+        working-directory: ai-kepu-video-web/frontend
+        run: npm run test:e2e
+      - name: Run real full-stack E2E
+        working-directory: ai-kepu-video-web/frontend
+        run: npx playwright test --config=playwright.fullstack.config.js
 
   repo-hygiene:
     name: Repository hygiene
@@ -50,7 +93,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: "3.11"
       - name: Check public repository assets
         run: python scripts/check_readme_assets.py
       - name: Check tracked local-only paths

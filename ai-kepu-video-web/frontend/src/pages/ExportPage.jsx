@@ -74,6 +74,9 @@ export function ExportPage() {
   ))
   const [defaultExport] = useState(() => localStorage.getItem('kepu:mine:default_export') || 'mp4')
   const [folderPicking, setFolderPicking] = useState(false)
+  const [openOutputDirectory, setOpenOutputDirectory] = useState(() => (
+    localStorage.getItem('kepu:mine:open_output_directory') !== 'false'
+  ))
   const pathCheck = useMemo(() => validateExtractPath(extractPath, targetOS), [extractPath, targetOS])
   const activeJobsKey = useMemo(
     () => loadedTaskId === taskId ? buildExportPollingKey(taskId, jobs) : null,
@@ -237,7 +240,7 @@ export function ExportPage() {
 
   const startExport = async (target, { forceRender = false } = {}) => {
     const expectedTaskId = taskId
-    const payload = { target, use_preview: !forceRender }
+    const payload = { target, use_preview: !forceRender, open_output_directory: openOutputDirectory }
     if (target === 'mp4') payload.auto_download = true
     if (target === 'draft_local') {
       if (!pathCheck.valid) {
@@ -330,6 +333,8 @@ export function ExportPage() {
         <StatusMetric label="分镜素材" value={materialsSummary.statusLabel} ready={materialsSummary.complete} warning={materialsSummary.available && !materialsSummary.complete} />
         <StatusMetric label="剪映草稿" value={draftStatus} ready={jobs.draft_local?.status === 'completed' || draftAvailable} warning={jobs.draft_local?.status === 'failed'} />
       </section>
+
+      <label className="export-open-option"><input type="checkbox" checked={openOutputDirectory} onChange={event => { const checked = event.target.checked; setOpenOutputDirectory(checked); localStorage.setItem('kepu:mine:open_output_directory', String(checked)) }} /><span><strong>完成后打开输出目录</strong><small>默认开启；打开失败只会显示提醒，不影响导出文件。</small></span></label>
 
       {exportJobsPolling.error ? <PollingFailureNotice
         title="导出连接中断"

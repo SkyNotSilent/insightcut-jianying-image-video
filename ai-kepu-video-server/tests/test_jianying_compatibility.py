@@ -40,29 +40,14 @@ class JianyingCompatibilityTester:
         if not draft_content:
             return False
 
-        # 3. 必需字段检查
-        if not self._test_required_fields(draft_content):
-            return False
-
-        # 4. 轨道结构检查
-        if not self._test_track_structure(draft_content):
-            return False
-
-        # 5. 时间轴连续性检查
-        if not self._test_timeline_continuity(draft_content):
-            return False
-
-        # 6. 素材引用检查
-        if not self._test_material_references(draft_content):
-            return False
-
-        # 7. 文件路径检查
-        if not self._test_file_paths(draft_content):
-            return False
-
-        # 8. 时长一致性检查
-        if not self._test_duration_consistency(draft_content):
-            return False
+        # 后续检查尽量全部执行，一次给出完整修复清单。单项失败由
+        # self.errors 汇总，避免第一个错误掩盖后续兼容性问题。
+        self._test_required_fields(draft_content)
+        self._test_track_structure(draft_content)
+        self._test_timeline_continuity(draft_content)
+        self._test_material_references(draft_content)
+        self._test_file_paths(draft_content)
+        self._test_duration_consistency(draft_content)
 
         # 输出测试结果
         self._print_results()
@@ -147,6 +132,30 @@ class JianyingCompatibilityTester:
             self.errors.append("缺少视频轨道")
             return False
 
+        video_segments = [
+            segment
+            for track in tracks if track.get('type') == 'video'
+            for segment in track.get('segments', [])
+        ]
+        if not video_segments:
+            self.errors.append("视频轨道为空")
+            return False
+
+        segment_counts = {
+            track_type: sum(
+                len(track.get('segments', []))
+                for track in tracks if track.get('type') == track_type
+            )
+            for track_type in ('video', 'audio', 'text')
+        }
+        for track_type in ('audio', 'text'):
+            count = segment_counts[track_type]
+            if count and count != segment_counts['video']:
+                self.errors.append(
+                    f"视频轨与{track_type}轨分镜数量不一致: "
+                    f"{segment_counts['video']} != {count}"
+                )
+
         self.info.append(f"✓ 轨道结构正确: {dict(track_types)}")
         return True
 
@@ -181,15 +190,16 @@ class JianyingCompatibilityTester:
 
                 gap = next_start - current_end
 
-                if gap > 0:
+                tolerance = self._frame_tolerance(draft)
+                if gap > tolerance:
                     has_gaps = True
-                    self.warnings.append(
+                    self.errors.append(
                         f"轨道 {track_type} 存在间隙: {gap/1000000:.3f}秒 "
                         f"(片段 {i} -> {i+1})"
                     )
-                elif gap < 0:
+                elif gap < -tolerance:
                     has_overlaps = True
-                    self.warnings.append(
+                    self.errors.append(
                         f"轨道 {track_type} 存在重叠: {-gap/1000000:.3f}秒 "
                         f"(片段 {i} -> {i+1})"
                     )
@@ -199,7 +209,16 @@ class JianyingCompatibilityTester:
         elif has_gaps and not has_overlaps:
             self.info.append("⚠ 时间轴有间隙（可能是有意设计）")
 
-        return True
+        return not has_gaps and not has_overlaps
+
+    @staticmethod
+    def _frame_tolerance(draft: Dict[str, Any]) -> int:
+        fps = draft.get('fps') or 30
+        try:
+            fps = max(1.0, float(fps))
+        except (TypeError, ValueError):
+            fps = 30.0
+        return int(round(1_000_000 / fps))
 
     def _test_material_references(self, draft: Dict[str, Any]) -> bool:
         """测试素材引用完整性"""
@@ -295,11 +314,11 @@ class JianyingCompatibilityTester:
                     max_track_duration = max(max_track_duration, end_time)
 
         # 允许 1 帧的误差 (1/30 秒 = 33333 微秒)
-        tolerance = 33333
+        tolerance = self._frame_tolerance(draft)
         diff = abs(draft_duration - max_track_duration)
 
         if diff > tolerance:
-            self.warnings.append(
+            self.errors.append(
                 f"草稿时长 ({draft_duration/1000000:.3f}s) 与轨道时长 "
                 f"({max_track_duration/1000000:.3f}s) 不一致，差异 "
                 f"{diff/1000000:.3f}s"
@@ -309,7 +328,7 @@ class JianyingCompatibilityTester:
             f"✓ 时长: {draft_duration/1000000:.2f}秒 "
             f"(轨道: {max_track_duration/1000000:.2f}秒)"
         )
-        return True
+        return diff <= tolerance
 
     def _print_results(self):
         """打印测试结果"""

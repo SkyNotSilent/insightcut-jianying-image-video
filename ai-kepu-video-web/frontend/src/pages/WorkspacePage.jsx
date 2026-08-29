@@ -1242,7 +1242,7 @@ export function WorkspacePage() {
         </section> : null}
 
         <details className={`workspace-center-script${workspace.script_text ? '' : ' is-loading'}`} open>
-          <summary><span><strong>完整文案</strong><small>{workspace.input_mode === 'theme' ? '主题扩写结果' : '严格保留用户原文'}</small></span><span>{workspace.script_text ? `${workspace.script_text.replace(/\s/g, '').length} 字` : '生成中'}</span></summary>
+          <summary><span><strong>完整文案</strong><small>{workspace.script_source === 'reconstructed_segments' ? '由已保存分镜恢复' : workspace.input_mode === 'theme' ? '主题扩写结果' : '严格保留用户原文'}</small></span><span>{workspace.script_text ? `${workspace.script_text.replace(/\s/g, '').length} 字${workspace.script_source === 'reconstructed_segments' ? ' · 恢复稿' : ''}` : '生成中'}</span></summary>
           {workspace.script_text ? <p>{workspace.script_text}</p> : <div className="workspace-script-skeleton"><i /><i /><i /><i /></div>}
         </details>
 

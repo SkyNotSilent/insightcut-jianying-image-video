@@ -1,4 +1,4 @@
-import { Download, FileText, FolderKanban, LayoutDashboard, LayoutTemplate, Settings } from 'lucide-react'
+import { Download, FileStack, FileText, FolderKanban, LayoutDashboard, LayoutTemplate, Settings } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { NavLink, useLocation } from 'react-router'
 import { PROJECT_SELECTION_EVENT, projectIdFromPath, readSelectedProject } from '../lib/projectSelection'
@@ -15,6 +15,7 @@ export function BrandNavigation() {
 
   const navigationItems = useMemo(() => [
     { to: '/manuscript', label: '文稿', icon: FileText },
+    { to: '/batches', label: '批量预案', icon: FileStack },
     { to: activeTaskId ? `/workspace/${activeTaskId}` : '/assets?open=workspace', label: '工作台', icon: LayoutDashboard },
     { to: activeTaskId ? `/export/${activeTaskId}` : '/assets?open=export', label: '导出中心', icon: Download },
     { to: '/assets', label: '项目资产', icon: FolderKanban },
