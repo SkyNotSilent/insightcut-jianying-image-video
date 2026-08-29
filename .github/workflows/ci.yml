@@ -17,6 +17,8 @@ jobs:
           python-version: "3.11"
           cache: "pip"
           cache-dependency-path: ai-kepu-video-server/requirements.txt
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg
       - name: Install backend dependencies
         working-directory: ai-kepu-video-server
         run: |
@@ -39,7 +41,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: ai-kepu-video-web/frontend/package-lock.json
       - name: Install frontend dependencies
@@ -53,7 +55,16 @@ jobs:
         run: npm run test:all
       - name: Audit frontend dependencies
         working-directory: ai-kepu-video-web/frontend
-        run: npm audit --audit-level=high
+        run: |
+          for attempt in 1 2 3; do
+            if npm audit --package-lock-only --audit-level=high; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 5))
+            fi
+          done
+          exit 1
 
   full-stack-e2e:
     name: Real full-stack Playwright
@@ -70,7 +81,7 @@ jobs:
         run: pip install -r requirements.txt
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: ai-kepu-video-web/frontend/package-lock.json
       - name: Install frontend dependencies
