@@ -7,6 +7,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -134,6 +135,21 @@ async def structured_http_error(_request: Request, exc: HTTPException):
         headers=headers,
         content={
             "detail": detail or safe.safe_message,
+            "error_code": safe.code.value,
+            "error_meta": safe.metadata(),
+        },
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def structured_validation_error(_request: Request, _exc: RequestValidationError):
+    """Return a stable 422 model without reflecting untrusted request values."""
+
+    safe = make_safe_error(ErrorCode.UNKNOWN, http_status=422)
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "请求参数无效，请检查输入后重试。",
             "error_code": safe.code.value,
             "error_meta": safe.metadata(),
         },

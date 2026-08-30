@@ -310,9 +310,10 @@ class TaskManager:
         template_id: Optional[str] = None,
         generation_options: Optional[Dict] = None,
         subtitle_options: Optional[Dict] = None,
+        task_id: Optional[str] = None,
     ) -> str:
         """创建新任务"""
-        task_id = uuid.uuid4().hex
+        task_id = task_id or uuid.uuid4().hex
         workflow_phase = "planning" if execution_mode == "review_first" else "pending"
         task = Task(
             task_id, theme, style, length, voice_type, name, ratio, tts_options,
@@ -322,7 +323,7 @@ class TaskManager:
         with self.lock:
             self.tasks[task_id] = task
 
-        db_client.create_task(
+        created = db_client.create_task(
             task_id, theme, style, length, name, ratio, voice_type,
             tts_options=task.tts_options,
             execution_mode=execution_mode,
@@ -332,6 +333,10 @@ class TaskManager:
             generation_options=generation_options,
             subtitle_options=subtitle_options,
         )
+        if not created and not db_client.get_task(task_id):
+            with self.lock:
+                self.tasks.pop(task_id, None)
+            raise RuntimeError("任务记录创建失败")
 
         # 缓存到内存
         task_data = {

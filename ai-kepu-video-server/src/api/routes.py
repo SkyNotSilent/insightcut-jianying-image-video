@@ -17,7 +17,6 @@ import time
 import uuid
 import zipfile
 import xml.etree.ElementTree as ET
-import unicodedata
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -2287,8 +2286,30 @@ async def create_task(request: CreateTaskRequest):
     )
 
 
+def _clean_batch_theme(value: str) -> str:
+    """Apply the deliberately small, version-stable web/API normalization set."""
+    characters = []
+    for character in str(value or ""):
+        codepoint = ord(character)
+        if codepoint == 0x3000:
+            characters.append(" ")
+        elif 0xFF01 <= codepoint <= 0xFF5E:
+            characters.append(chr(codepoint - 0xFEE0))
+        else:
+            characters.append(character)
+    ascii_spaced = "".join(
+        " " if character in " \t\n\r\f\v" else character
+        for character in characters
+    )
+    return " ".join(part for part in ascii_spaced.split(" ") if part)
+
+
 def _normalize_batch_theme(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", str(value or "")).split()).casefold()
+    normalized = _clean_batch_theme(value)
+    return "".join(
+        chr(ord(character) + 32) if "A" <= character <= "Z" else character
+        for character in normalized
+    )
 
 
 @router.post("/batches", status_code=201)
@@ -2296,7 +2317,7 @@ async def create_batch(request: CreateBatchRequest):
     normalized = []
     seen = set()
     for item in request.items:
-        theme = " ".join(unicodedata.normalize("NFKC", item.theme).split())
+        theme = _clean_batch_theme(item.theme)
         key = _normalize_batch_theme(theme)
         if not key:
             raise HTTPException(status_code=400, detail="批量主题不能是空行")

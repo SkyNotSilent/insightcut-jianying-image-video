@@ -5,7 +5,9 @@ import fs from 'node:fs'
 
 const frontendDir = path.dirname(fileURLToPath(import.meta.url))
 const serverDir = path.resolve(frontendDir, '../../ai-kepu-video-server')
-const runtimeDir = path.resolve(serverDir, '.e2e-runtime')
+const runtimeDir = process.env.INSIGHTCUT_E2E_RUNTIME_DIR
+  ? path.resolve(process.env.INSIGHTCUT_E2E_RUNTIME_DIR)
+  : path.resolve(serverDir, '.e2e-runtime')
 const bundledPython = path.join(serverDir, 'venv', 'bin', 'python')
 const python = process.env.INSIGHTCUT_PYTHON || (fs.existsSync(bundledPython) ? bundledPython : 'python')
 

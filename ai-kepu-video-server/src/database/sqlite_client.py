@@ -8,6 +8,7 @@ import sqlite3
 import os
 import uuid
 import json
+import threading
 from datetime import datetime
 from typing import Optional, List, Dict
 from contextlib import contextmanager
@@ -29,6 +30,16 @@ from src.draft.voice_catalog import (
 )
 
 logger = logging.getLogger(__name__)
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None
+
+try:
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX platforms
+    msvcrt = None
 
 DB_PATH = Path(
     os.getenv("INSIGHTCUT_DB_PATH")
@@ -65,6 +76,10 @@ class SQLiteClient:
 
     def __init__(self):
         self._initialized = False
+        self._batch_scheduler_lock_guard = threading.Lock()
+        self._batch_scheduler_lock_handles = {}
+        self._batch_launch_thread_lock = threading.RLock()
+        self._batch_launch_local = threading.local()
 
     def _init_db(self):
         """初始化数据库和表结构"""
@@ -3095,9 +3110,10 @@ class SQLiteClient:
         finally:
             conn.close()
 
-    def claim_next_batch_item(self) -> Dict:
+    def claim_next_batch_item(self, *, global_concurrency: int = 3) -> Dict:
         if not self._initialized:
             self._init_db()
+        global_concurrency = max(1, min(3, int(global_concurrency)))
         conn = self._get_conn()
         try:
             cur = conn.cursor()
@@ -3107,10 +3123,13 @@ class SQLiteClient:
                    FROM task_batch_items i
                    JOIN task_batches b ON b.batch_id=i.batch_id
                    WHERE i.status='queued' AND b.cancel_requested=0
+                     AND (SELECT COUNT(*) FROM task_batch_items global_active
+                          WHERE global_active.status='running') < ?
                      AND (SELECT COUNT(*) FROM task_batch_items active
                           WHERE active.batch_id=i.batch_id AND active.status='running') < b.concurrency
                    ORDER BY b.created_at ASC, b.id ASC, i.position ASC, i.id ASC
-                   LIMIT 1"""
+                   LIMIT 1""",
+                (global_concurrency,),
             ).fetchone()
             if not row:
                 conn.commit()
@@ -3148,6 +3167,131 @@ class SQLiteClient:
             return cur.rowcount == 1
         finally:
             conn.close()
+
+    def reserve_batch_item_task(self, item_id: str, proposed_task_id: str) -> Optional[str]:
+        """Persist one task identity before task creation so crash recovery is idempotent."""
+        if not self._initialized:
+            self._init_db()
+        conn = self._get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
+            row = cur.execute(
+                "SELECT status, task_id FROM task_batch_items WHERE item_id=?",
+                (item_id,),
+            ).fetchone()
+            if not row or row["status"] != "running":
+                conn.rollback()
+                return None
+            task_id = row["task_id"] or str(proposed_task_id)
+            if not row["task_id"]:
+                cur.execute(
+                    """UPDATE task_batch_items SET task_id=?,
+                       updated_at=datetime('now','localtime')
+                       WHERE item_id=? AND status='running' AND task_id IS NULL""",
+                    (task_id, item_id),
+                )
+                if cur.rowcount != 1:
+                    conn.rollback()
+                    return None
+            conn.commit()
+            return task_id
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def try_acquire_batch_scheduler_lock(self, owner_id: str) -> bool:
+        """Hold one scheduler owner per local database until process exit or release."""
+        owner_id = str(owner_id)
+        with self._batch_scheduler_lock_guard:
+            if owner_id in self._batch_scheduler_lock_handles:
+                return True
+            lock_path = DB_PATH.with_name(f".{DB_PATH.name}.batch-scheduler.lock")
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            handle = open(lock_path, "a+b")
+            try:
+                if fcntl is not None:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    backend = "fcntl"
+                elif msvcrt is not None:  # pragma: no cover - Windows fallback
+                    handle.seek(0, os.SEEK_END)
+                    if handle.tell() == 0:
+                        handle.write(b"\0")
+                        handle.flush()
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    backend = "msvcrt"
+                else:  # pragma: no cover - unsupported platform
+                    logger.error("当前平台不支持批量调度器进程锁")
+                    handle.close()
+                    return False
+            except (BlockingIOError, OSError):
+                handle.close()
+                return False
+            self._batch_scheduler_lock_handles[owner_id] = (backend, handle)
+            return True
+
+    def release_batch_scheduler_lock(self, owner_id: str) -> bool:
+        """Release a lock explicitly; process termination also releases it safely."""
+        with self._batch_scheduler_lock_guard:
+            entry = self._batch_scheduler_lock_handles.pop(str(owner_id), None)
+            if entry is None:
+                return False
+            backend, handle = entry
+            try:
+                if backend == "fcntl":
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                else:  # pragma: no cover - Windows fallback
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            finally:
+                handle.close()
+            return True
+
+    @contextmanager
+    def batch_launch_guard(self):
+        """Serialize batch cancellation with provider launch across API processes."""
+        with self._batch_launch_thread_lock:
+            depth = getattr(self._batch_launch_local, "depth", 0)
+            if depth:
+                self._batch_launch_local.depth = depth + 1
+                try:
+                    yield
+                finally:
+                    self._batch_launch_local.depth = depth
+                return
+
+            lock_path = DB_PATH.with_name(f".{DB_PATH.name}.batch-launch.lock")
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            handle = open(lock_path, "a+b")
+            try:
+                if fcntl is not None:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                    backend = "fcntl"
+                elif msvcrt is not None:  # pragma: no cover - Windows fallback
+                    handle.seek(0, os.SEEK_END)
+                    if handle.tell() == 0:
+                        handle.write(b"\0")
+                        handle.flush()
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                    backend = "msvcrt"
+                else:  # pragma: no cover - unsupported platform
+                    raise RuntimeError("当前平台不支持批量启动进程锁")
+                self._batch_launch_local.depth = 1
+                try:
+                    yield
+                finally:
+                    self._batch_launch_local.depth = 0
+                    if backend == "fcntl":
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                    else:  # pragma: no cover - Windows fallback
+                        handle.seek(0)
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            finally:
+                handle.close()
 
     def update_batch_item_status(
         self,
@@ -3201,12 +3345,26 @@ class SQLiteClient:
             conn.close()
 
     def cancel_batch(self, batch_id: str) -> Dict:
+        with self.batch_launch_guard():
+            return self._cancel_batch_locked(batch_id)
+
+    def _cancel_batch_locked(self, batch_id: str) -> Dict:
         if not self._initialized:
             self._init_db()
         conn = self._get_conn()
         try:
             cur = conn.cursor()
             cur.execute("BEGIN IMMEDIATE")
+            batch = cur.execute(
+                "SELECT status FROM task_batches WHERE batch_id=?",
+                (batch_id,),
+            ).fetchone()
+            if not batch:
+                conn.rollback()
+                return {}
+            if batch["status"] in {"completed", "completed_with_errors", "cancelled"}:
+                conn.commit()
+                return {"batch_id": batch_id, "running": []}
             cur.execute(
                 """UPDATE task_batches SET cancel_requested=1,
                    updated_at=datetime('now','localtime') WHERE batch_id=?""",
@@ -3288,6 +3446,9 @@ class SQLiteClient:
                 """UPDATE task_batch_items SET status=CASE
                        WHEN batch_id IN (SELECT batch_id FROM task_batches WHERE cancel_requested=1)
                        THEN 'cancelled' ELSE 'queued' END,
+                   completed_at=CASE
+                       WHEN batch_id IN (SELECT batch_id FROM task_batches WHERE cancel_requested=1)
+                       THEN datetime('now','localtime') ELSE NULL END,
                    updated_at=datetime('now','localtime') WHERE status='running'"""
             )
             count = cur.rowcount

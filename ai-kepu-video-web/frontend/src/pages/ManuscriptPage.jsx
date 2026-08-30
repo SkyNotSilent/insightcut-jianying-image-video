@@ -398,12 +398,26 @@ function CreationModeSwitch({ value, onChange }) {
   </nav>
 }
 
+function cleanBatchTheme(value) {
+  const widthNormalized = Array.from(String(value || ''), character => {
+    const codepoint = character.codePointAt(0)
+    if (codepoint === 0x3000) return ' '
+    if (codepoint >= 0xFF01 && codepoint <= 0xFF5E) return String.fromCodePoint(codepoint - 0xFEE0)
+    return character
+  }).join('')
+  return widthNormalized.replace(/[\u0009-\u000d\u0020]+/g, ' ').replace(/^ | $/g, '')
+}
+
+function normalizeBatchTheme(value) {
+  return cleanBatchTheme(value).replace(/[A-Z]/g, character => character.toLowerCase())
+}
+
 export function parseTopics(value) {
-  const topics = String(value || '').split(/\r?\n/).map(topic => topic.trim()).filter(Boolean)
+  const topics = String(value || '').split(/\r\n|\n|\r/).map(cleanBatchTheme).filter(Boolean)
   const seen = new Map()
   const duplicates = []
   topics.forEach(topic => {
-    const key = topic.normalize('NFKC').replace(/\s+/g, ' ').trim().toLocaleLowerCase()
+    const key = normalizeBatchTheme(topic)
     if (seen.has(key) && !duplicates.includes(topic)) duplicates.push(topic)
     else seen.set(key, topic)
   })

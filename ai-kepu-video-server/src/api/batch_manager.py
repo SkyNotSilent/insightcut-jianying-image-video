@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 import uuid
+from contextlib import nullcontext
 from typing import Dict, Optional
 
 from src.database import db_client
@@ -33,6 +34,7 @@ class BatchScheduler:
         runtime=None,
         global_concurrency: int = GLOBAL_BATCH_CONCURRENCY,
         poll_interval: float = 0.25,
+        owner_id: Optional[str] = None,
     ):
         self.database = database or db_client
         self.manager = manager or task_manager
@@ -40,11 +42,15 @@ class BatchScheduler:
         self.runtime = runtime or task_runtime
         self.global_concurrency = max(1, min(3, int(global_concurrency)))
         self.poll_interval = max(0.02, float(poll_interval))
+        self.owner_id = owner_id or f"batch_scheduler_{uuid.uuid4().hex}"
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
         self._lock = threading.Lock()
+        self._launch_lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         self._workers: Dict[str, threading.Thread] = {}
+        self._has_leadership = False
+        self._recovery_completed = False
 
     @property
     def is_running(self) -> bool:
@@ -55,9 +61,10 @@ class BatchScheduler:
         with self._lock:
             if self._thread and self._thread.is_alive():
                 return False
-            self.database.recover_batch_items()
             self._stop_event.clear()
             self._wake_event.set()
+            self._has_leadership = False
+            self._recovery_completed = False
             self._thread = threading.Thread(
                 target=self._run_loop,
                 name="insightcut-batch-scheduler",
@@ -100,7 +107,9 @@ class BatchScheduler:
             with self._lock:
                 if len(self._workers) >= self.global_concurrency:
                     return
-            item = self.database.claim_next_batch_item()
+            item = self.database.claim_next_batch_item(
+                global_concurrency=self.global_concurrency
+            )
             if not item:
                 return
             worker = threading.Thread(
@@ -113,14 +122,61 @@ class BatchScheduler:
                 self._workers[item["item_id"]] = worker
             worker.start()
 
+    def _ensure_leadership(self) -> bool:
+        acquire = getattr(self.database, "try_acquire_batch_scheduler_lock", None)
+        if callable(acquire):
+            try:
+                acquired = bool(acquire(self.owner_id))
+            except Exception:
+                logger.exception("批量调度器进程锁获取失败")
+                acquired = False
+        else:
+            acquired = True
+        if not acquired:
+            self._has_leadership = False
+            self._recovery_completed = False
+            return False
+        self._has_leadership = acquired
+        if not self._recovery_completed:
+            recover = getattr(self.database, "recover_batch_items", None)
+            if callable(recover):
+                recover()
+            self._recovery_completed = True
+        return acquired
+
     def _run_loop(self) -> None:
-        while not self._stop_event.is_set():
-            self._dispatch()
-            self._wake_event.wait(self.poll_interval)
-            self._wake_event.clear()
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    if self._ensure_leadership():
+                        self._dispatch()
+                except Exception:
+                    logger.exception("批量调度循环遇到瞬时故障，将继续重试")
+                self._wake_event.wait(self.poll_interval)
+                self._wake_event.clear()
+        finally:
+            release = getattr(self.database, "release_batch_scheduler_lock", None)
+            if callable(release):
+                try:
+                    release(self.owner_id)
+                except Exception:
+                    logger.exception("批量调度器进程锁释放失败")
+            self._has_leadership = False
+            self._recovery_completed = False
 
     def _create_task(self, item: Dict) -> str:
         config = item.get("config") or {}
+        proposed_task_id = uuid.uuid4().hex
+        reserve = getattr(self.database, "reserve_batch_item_task", None)
+        task_id = (
+            reserve(item["item_id"], proposed_task_id)
+            if callable(reserve)
+            else proposed_task_id
+        )
+        if not task_id:
+            raise RuntimeError("批次任务标识预留失败")
+        if self.database.get_task(task_id):
+            return task_id
         task_id = self.manager.create_task(
             theme=item["theme"],
             name=item.get("name") or item["theme"][:20],
@@ -134,15 +190,22 @@ class BatchScheduler:
             template_id=config.get("template_id"),
             generation_options=config.get("generation_options") or {},
             subtitle_options=config.get("subtitle_options") or {},
+            task_id=task_id,
         )
-        if not self.database.set_batch_item_task(item["item_id"], task_id):
+        if not callable(reserve) and not self.database.set_batch_item_task(
+            item["item_id"], task_id
+        ):
             raise RuntimeError("批次任务关联保存失败")
         return task_id
 
     def _start_or_resume(self, item: Dict, task_id: str) -> bool:
         row = self.database.get_task(task_id) or {}
         status = row.get("status")
-        if status in {TaskStatus.AWAITING_CONFIRMATION.value, TaskStatus.COMPLETED.value}:
+        if status in {
+            TaskStatus.AWAITING_CONFIRMATION.value,
+            TaskStatus.AWAITING_FINALIZATION.value,
+            TaskStatus.COMPLETED.value,
+        }:
             return True
         if status in {TaskStatus.FAILED.value, TaskStatus.INTERRUPTED.value}:
             return self.executor.resume_task(task_id) in {"started", "already_running"}
@@ -167,10 +230,23 @@ class BatchScheduler:
         if not current or current.get("cancel_requested"):
             self.database.update_batch_item_status(item["item_id"], "cancelled")
             return
-        task_id = current.get("task_id") or self._create_task(current)
-        current = self.database.get_batch_item(item["item_id"])
-        if not self._start_or_resume(current, task_id):
-            raise RuntimeError("批次项目无法启动或恢复")
+        with self._launch_lock:
+            guard_factory = getattr(self.database, "batch_launch_guard", None)
+            guard = guard_factory() if callable(guard_factory) else nullcontext()
+            with guard:
+                current = self.database.get_batch_item(item["item_id"])
+                if not current or current.get("cancel_requested"):
+                    self.database.update_batch_item_status(item["item_id"], "cancelled")
+                    return
+                task_id = current.get("task_id")
+                if not task_id or not self.database.get_task(task_id):
+                    task_id = self._create_task(current)
+                current = self.database.get_batch_item(item["item_id"])
+                if not current or current.get("cancel_requested"):
+                    self.database.update_batch_item_status(item["item_id"], "cancelled")
+                    return
+                if not self._start_or_resume(current, task_id):
+                    raise RuntimeError("批次项目无法启动或恢复")
 
         while not self._stop_event.is_set():
             current = self.database.get_batch_item(item["item_id"])
@@ -184,6 +260,7 @@ class BatchScheduler:
             status = task.get("status")
             if status in {
                 TaskStatus.AWAITING_CONFIRMATION.value,
+                TaskStatus.AWAITING_FINALIZATION.value,
                 TaskStatus.COMPLETED.value,
             }:
                 self.database.update_batch_item_status(
@@ -230,11 +307,12 @@ class BatchScheduler:
             self._wake_event.set()
 
     def cancel_batch(self, batch_id: str) -> Dict:
-        result = self.database.cancel_batch(batch_id)
-        for running in result.get("running", []):
-            task_id = running.get("task_id")
-            if task_id:
-                self.runtime.request_cancel(task_id)
+        with self._launch_lock:
+            result = self.database.cancel_batch(batch_id)
+            for running in result.get("running", []):
+                task_id = running.get("task_id")
+                if task_id:
+                    self.runtime.request_cancel(task_id)
         self.wake()
         return self.database.get_batch(batch_id) if result else {}
 

@@ -100,6 +100,12 @@ def _run_batch_cli(arguments) -> None:
         f"[结束] {batch['status']}：待确认 {counts.get('awaiting_confirmation', 0)}，"
         f"失败 {counts.get('failed', 0)}，取消 {counts.get('cancelled', 0)}"
     )
+    failed_count = int(counts.get("failed", 0) or 0)
+    cancelled_count = int(counts.get("cancelled", 0) or 0)
+    if batch.get("status") != "completed" or failed_count or cancelled_count:
+        raise RuntimeError(
+            f"批次未全部成功：失败 {failed_count}，取消 {cancelled_count}"
+        )
 
 
 def main():

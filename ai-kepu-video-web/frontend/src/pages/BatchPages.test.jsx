@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { BatchDetailPage } from './BatchDetailPage'
@@ -29,10 +29,21 @@ const completedBatch = {
 }
 
 describe('batch planning pages', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('detects duplicates after Unicode and whitespace normalization', () => {
     const parsed = parseTopics('ＡＩ   助手\nAI 助手\n\n极光')
     expect(parsed.topics).toHaveLength(3)
     expect(parsed.duplicates).toEqual(['AI 助手'])
+  })
+
+  it('uses the same version-stable folding boundaries as the backend', () => {
+    expect(parseTopics('ASCII\tSPACE\nascii space').duplicates).toEqual(['ascii space'])
+    expect(parseTopics('Straße\nSTRASSE').duplicates).toEqual([])
+    expect(parseTopics('ς\nΣ').duplicates).toEqual([])
+    expect(parseTopics('A B\nA\u0085B\nA\ufeffB').duplicates).toEqual([])
   })
 
   it('restores a completed detail view from its persisted API state', async () => {
@@ -73,5 +84,35 @@ describe('batch planning pages', () => {
     render(<MemoryRouter><BatchListPage /></MemoryRouter>)
     expect(await screen.findByText('还没有批量预案')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '创建第一个批次' })).toBeEnabled()
+  })
+
+  it('restarts polling after retrying a terminal batch with failures', async () => {
+    const failedBatch = {
+      ...completedBatch,
+      status: 'completed_with_errors',
+      counts: { queued: 0, running: 0, awaiting_confirmation: 1, failed: 1, cancelled: 0 },
+      items: [
+        completedBatch.items[0],
+        { ...completedBatch.items[1], status: 'failed', error: '处理未完成，请稍后重试或检查配置。' },
+      ],
+    }
+    const runningBatch = {
+      ...failedBatch,
+      status: 'running',
+      counts: { queued: 0, running: 1, awaiting_confirmation: 1, failed: 0, cancelled: 0 },
+      items: [completedBatch.items[0], { ...completedBatch.items[1], status: 'running' }],
+    }
+    taskApi.getBatch
+      .mockResolvedValueOnce(failedBatch)
+      .mockResolvedValueOnce(runningBatch)
+      .mockResolvedValue(completedBatch)
+    taskApi.retryFailedBatchItems.mockResolvedValue({ batch_id: 'batch-1', retried_count: 1 })
+    render(<MemoryRouter initialEntries={['/batches/batch-1']}><Routes><Route path="/batches/:batchId" element={<BatchDetailPage />} /></Routes></MemoryRouter>)
+
+    fireEvent.click(await screen.findByRole('button', { name: '重试失败项' }))
+
+    await waitFor(() => expect(taskApi.retryFailedBatchItems).toHaveBeenCalledWith('batch-1'))
+    await waitFor(() => expect(taskApi.getBatch).toHaveBeenCalledTimes(3), { timeout: 3500 })
+    expect(await screen.findByText('2 / 2')).toBeInTheDocument()
   })
 })

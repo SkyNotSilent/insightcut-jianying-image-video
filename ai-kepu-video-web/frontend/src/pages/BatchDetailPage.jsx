@@ -20,6 +20,7 @@ export function BatchDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
+  const [pollRevision, setPollRevision] = useState(0)
   const requestActive = useRef(false)
 
   const load = useCallback(async signal => {
@@ -48,7 +49,7 @@ export function BatchDetailPage() {
     }
     tick()
     return () => { controller.abort(); window.clearTimeout(timer) }
-  }, [load])
+  }, [load, pollRevision])
 
   const counts = batch?.counts || {}
   const settled = Number(counts.awaiting_confirmation || 0) + Number(counts.failed || 0) + Number(counts.cancelled || 0)
@@ -66,7 +67,7 @@ export function BatchDetailPage() {
   }
   const retry = async () => {
     setBusy('retry')
-    try { const result = await retryFailedBatchItems(batchId); toast.success(`已重新排队 ${result.retried_count} 项`); await load() }
+    try { const result = await retryFailedBatchItems(batchId); toast.success(`已重新排队 ${result.retried_count} 项`); await load(); setPollRevision(value => value + 1) }
     catch { toast.error('重试失败项未能启动') } finally { setBusy('') }
   }
 
