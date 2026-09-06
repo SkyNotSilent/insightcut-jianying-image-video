@@ -1,0 +1,122 @@
+{
+  "date": "2026-09-07",
+  "automated": {
+    "backend": 426,
+    "frontend_logic": 139,
+    "frontend_components": 43,
+    "browser_mock": 7,
+    "real_backend_browser_cases": 6,
+    "local_artifacts": "PNG/WAV -> automatic MP4 -> SRT/VTT -> materials and asset ZIPs -> draft ZIP/local copy/backup replacement"
+  },
+  "real_provider_cases": [
+    {
+      "name": "[验收0906]彩虹主题",
+      "task_id": "0e75bc40cf2a483a84d414c4f7bc04aa",
+      "batch_id": "batch_6fa6316e6aaa479d9088dc942306486b",
+      "input_mode": "theme",
+      "status": "completed",
+      "preview_valid": true,
+      "duration_seconds": 14.408659,
+      "streams": [
+        {
+          "codec_type": "video",
+          "width": 1920,
+          "height": 1080,
+          "sample_rate": null
+        },
+        {
+          "codec_type": "audio",
+          "width": null,
+          "height": null,
+          "sample_rate": "24000"
+        }
+      ],
+      "segments": 4,
+      "generic_prompt_count": 0,
+      "first_attempt_failed": false
+    },
+    {
+      "name": "[验收0906]猫咪主题",
+      "task_id": "77eed1a0a25643eda44ba200181f7350",
+      "batch_id": "batch_6fa6316e6aaa479d9088dc942306486b",
+      "input_mode": "theme",
+      "status": "completed",
+      "preview_valid": true,
+      "duration_seconds": 15.341992,
+      "streams": [
+        {
+          "codec_type": "video",
+          "width": 1920,
+          "height": 1080,
+          "sample_rate": null
+        },
+        {
+          "codec_type": "audio",
+          "width": null,
+          "height": null,
+          "sample_rate": "24000"
+        }
+      ],
+      "segments": 6,
+      "generic_prompt_count": 2,
+      "first_attempt_failed": true
+    },
+    {
+      "name": "[验收0906]原稿一",
+      "task_id": "4809e95550c4405b8a7f349ed52466f4",
+      "batch_id": "batch_1e2fa9c60554451ab102386b8553aaae",
+      "input_mode": "script",
+      "status": "completed",
+      "preview_valid": true,
+      "duration_seconds": 6.941992,
+      "streams": [
+        {
+          "codec_type": "video",
+          "width": 1920,
+          "height": 1080,
+          "sample_rate": null
+        },
+        {
+          "codec_type": "audio",
+          "width": null,
+          "height": null,
+          "sample_rate": "24000"
+        }
+      ],
+      "segments": 2,
+      "generic_prompt_count": 0,
+      "first_attempt_failed": false
+    },
+    {
+      "name": "[验收0906]原稿二",
+      "task_id": "19798f97055a452c8511b06905caf8ad",
+      "batch_id": "batch_1e2fa9c60554451ab102386b8553aaae",
+      "input_mode": "script",
+      "status": "completed",
+      "preview_valid": true,
+      "duration_seconds": 6.075325,
+      "streams": [
+        {
+          "codec_type": "video",
+          "width": 1920,
+          "height": 1080,
+          "sample_rate": null
+        },
+        {
+          "codec_type": "audio",
+          "width": null,
+          "height": null,
+          "sample_rate": "24000"
+        }
+      ],
+      "segments": 2,
+      "generic_prompt_count": 0,
+      "first_attempt_failed": false
+    }
+  ],
+  "limitations": [
+    "One theme failed during text_generation with RuntimeError/unknown; sanitized logs do not establish the exact cause. One explicit retry succeeded.",
+    "Two segments of the retried theme used the generic prompt fallback.",
+    "Actual Jianying client opening and subjective audiovisual quality have not been accepted."
+  ]
+}

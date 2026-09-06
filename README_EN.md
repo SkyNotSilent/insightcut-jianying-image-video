@@ -13,7 +13,7 @@
   <p>
     <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/SkyNotSilent/insightcut-jianying-image-video/ci.yml?branch=master&amp;style=flat-square&amp;label=CI" alt="CI status" /></a>
     <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/stargazers"><img src="https://img.shields.io/github/stars/SkyNotSilent/insightcut-jianying-image-video?style=flat-square&amp;color=315FEA" alt="GitHub stars" /></a>
-    <img src="https://img.shields.io/badge/Python-3.9-315FEA?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.9" />
+    <img src="https://img.shields.io/badge/Python-3.11-315FEA?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.11" />
     <img src="https://img.shields.io/badge/React-19-315FEA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" />
     <img src="https://img.shields.io/badge/Local--first-SQLite-D46F44?style=flat-square" alt="Local first" />
     <img src="https://img.shields.io/badge/License-not%20declared-68748B?style=flat-square" alt="No open-source license declared" />
@@ -150,7 +150,7 @@ Unlike a typical one-click generator, InsightCut treats each run as a project th
 
 ### Requirements
 
-- Python 3.9
+- Python 3.11
 - Node.js and npm
 - FFmpeg; the installed <code>imageio-ffmpeg</code> package can provide a bundled binary
 
@@ -165,8 +165,8 @@ cd insightcut-jianying-image-video
 
 ~~~bash
 cd ai-kepu-video-server
-python3 -m venv venv
-source venv/bin/activate
+python3.11 -m venv venv311
+source venv311/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 ~~~
@@ -183,8 +183,8 @@ npm install
 Run inside <code>ai-kepu-video-server/</code>:
 
 ~~~bash
-source venv/bin/activate
-python -m uvicorn api_server:app --host 0.0.0.0 --port 2002 --reload
+source venv311/bin/activate
+python -m uvicorn api_server:app --host 127.0.0.1 --port 2002 --reload
 ~~~
 
 - Backend: <http://localhost:2002>
@@ -272,7 +272,7 @@ From that state you can:
 | Layer | Stack |
 | --- | --- |
 | Frontend | React 19, React Router 7, Vite 4, Axios, Lucide |
-| Backend | FastAPI, Python 3.9 |
+| Backend | FastAPI, Python 3.11 |
 | Database | Local SQLite |
 | Text | LiteLLM Provider Registry, OpenAI / Anthropic compatibility |
 | Image | Agnes Image 2.1 Flash, OpenAI-compatible Images API |
@@ -305,7 +305,7 @@ Backend:
 
 ~~~bash
 cd ai-kepu-video-server
-source venv/bin/activate
+source venv311/bin/activate
 python -m pytest -q
 ~~~
 

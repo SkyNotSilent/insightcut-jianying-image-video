@@ -36,7 +36,7 @@ lsof -ti:2002 | xargs kill -9 2>/dev/null || true
 **2. 启动后端服务**
 ```bash
 cd ai-kepu-video-server && \
-source venv/bin/activate && \
+source venv311/bin/activate && \
 python -m uvicorn api_server:app --host 127.0.0.1 --port 2002 --reload
 ```
 - 后端地址：http://localhost:2002
@@ -63,22 +63,28 @@ npm run dev
 ## 重要说明
 
 1. **后端入口文件**：使用 `api_server.py`（不是 `main.py`）
-2. **虚拟环境**：后端需要激活 venv 虚拟环境
+2. **虚拟环境**：后端需要激活 Python 3.11 的 venv311 虚拟环境；旧 venv 保留用于配套旧版本回退
 3. **后台运行**：两个服务都应该在后台运行（`run_in_background: true`）
 4. **启动顺序**：先启动后端，再启动前端（避免前端启动时后端未就绪）
 5. **本机安全边界**：后端默认只监听 `127.0.0.1`；CORS 只允许 `http://localhost:2001` 和 `http://127.0.0.1:2001`，不得恢复任意跨域或局域网监听。
-6. **批量预案**：Web 的“批量预案”支持 2–50 个主题、并发 1–3；只生成文稿、分镜和图片提示词并停在确认阶段，不自动生图或配音。CLI 使用 `python main.py batch --file topics.txt --concurrency 1..3 [--no-wait]`，通过同一后端 API 执行。
+6. **批量预案**：Web 的“批量预案”支持每批 2–50 个主题或完整文稿（同批一种模式），并发默认 3、可选 1–10；创建只生成预案，明确确认后由持久化生产流程自动生成图片、配音和 MP4；预览和试听可选，剪映草稿仅按需导出。CLI 主题模式使用 `python main.py batch --file topics.txt --concurrency 1..10 [--no-wait]`，通过同一后端 API 执行。
 7. **字幕与导出**：SRT/VTT、字幕资产和素材包必须复用 `SubtitleWriter`；导出必须经过 `AutoExporter` 的文件存在性与草稿预检，禁止用布尔值伪造成功。
 
 ## 开发注意事项
 
 - 前端使用 React 19 + React Router 7 + Vite 8
-- 后端使用 FastAPI + Python 3.10+（CI 使用 Python 3.11；安全修复版依赖不再支持 Python 3.9）
+- 后端使用 FastAPI + Python 3.11（本机替代环境 venv311，CI 同为 Python 3.11；不使用旧 Python 3.9 环境运行新版）
 - 素材库按 `segment_index` 排序展示（播放顺序）
-- 本地维护巡检：在 `ai-kepu-video-server/` 下运行 `python scripts/maintenance_report.py --dry-run` 查看日志、数据库、媒体目录体量和未引用素材；只有显式使用 `--apply` 才会删除未被数据库引用的媒体文件。
+- 运行并发：普通/批量任务共用最多 10 个生成阶段；同一批预案和素材阶段共同遵守本批并发设置；导出最多 2 个、FFmpeg 渲染最多 1 个、试听最多 2 个，其他文件处理使用 4 个工作线程，状态读取使用独立的 2 个线程；导出状态和取消不等待文件队列。等待确认阶段释放生成名额；删除和关闭服务等待文件操作退出。
+- 内容与导出：编辑按字段版本保存；重拆分有可恢复快照。同名剪映草稿默认另存副本，显式替换必须保留备份。用户选择任意本机草稿位置和登记合法外部媒体的能力必须保留。
+- 数据迁移与恢复：SQLite 迁移前自动备份，导出记录持久化；具体接口、备份和环境回退见 `docs/reliability-remediation.md`。
+- 本地维护巡检：在 `ai-kepu-video-server/` 下运行 `python scripts/maintenance_report.py --dry-run` 查看日志、数据库、媒体目录体量和未引用素材；只有显式使用 `--apply` 才会删除确认未引用的项目内部媒体文件；服务持有维护锁时拒绝删除，数据库异常停止，草稿内部、历史资产及克隆音色均受保护。不新增前端清理按钮、不自动删除。
 - **任务失败不能丢已生成内容**：任何任务被标记为 `failed` 时，已经生成的分镜文本、图片 prompt、图片、音频、草稿文件等资产必须继续入库并在素材库/预览页正常展示；失败状态只表示后续流程停止，不代表清空或隐藏已有资产。
 - **超时失败也要先保资产**：自动超时、手动失败、异常失败前，必须尽量保存当前已生成的 `task_segments` 和 `task_assets`，让用户能查看、替换、重新生成或基于已有素材继续处理。
 - **后台任务巡检**：`TASK_SWEEPER_INTERVAL_SECONDS` 控制超时任务与孤儿 operation 的后台巡检间隔，默认 `300` 秒；等待确认和等待完成生产阶段不参与超时判定。
+
+- **预案模板与输入**：模板目录供单项目/批量共用，当前设置互相独立，应用与创建均复制参数快照；主题目标字数 0 表示自动。完整文稿每卡/文件一篇，严格保留正文与空行；多文件提取最多同时 2 个。
+- **成片流程恢复**：`production_flows` 保存明确确认的版本与目标；排队继续，服务重启中断的生成或渲染必须由用户重试，禁止静默重复服务商调用。新流程不要求先构建草稿，旧任务不自动推进。接口与验收见 `docs/batch-video-workflow.md`。
 
 ## 模型调用架构
 

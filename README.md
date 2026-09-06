@@ -13,7 +13,7 @@
   <p>
     <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/SkyNotSilent/insightcut-jianying-image-video/ci.yml?branch=master&amp;style=flat-square&amp;label=CI" alt="CI 状态" /></a>
     <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/stargazers"><img src="https://img.shields.io/github/stars/SkyNotSilent/insightcut-jianying-image-video?style=flat-square&amp;color=315FEA" alt="GitHub Stars" /></a>
-    <img src="https://img.shields.io/badge/Python-3.10%2B-315FEA?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.10+" />
+    <img src="https://img.shields.io/badge/Python-3.11-315FEA?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.11" />
     <img src="https://img.shields.io/badge/React-19-315FEA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" />
     <img src="https://img.shields.io/badge/Local--first-SQLite-D46F44?style=flat-square" alt="本地优先" />
     <img src="https://img.shields.io/badge/License-not%20declared-68748B?style=flat-square" alt="尚未声明开源许可证" />
@@ -160,7 +160,7 @@ https://github.com/user-attachments/assets/e4695fbc-2339-4102-b631-bcf61df63264
 
 ### 1. 准备环境
 
-当前后端需要 Python 3.10+（CI 使用 3.11），前端使用 React 19、React Router 7 和 Vite 8。还需要 Node.js 20.19+、npm，以及可用的 FFmpeg；项目安装的 `imageio-ffmpeg` 可以提供内置二进制，系统 PATH 中已有 FFmpeg 时会优先使用系统版本。
+当前后端需要 Python 3.11（CI 使用 3.11），前端使用 React 19、React Router 7 和 Vite 8。还需要 Node.js 20.19+、npm，以及可用的 FFmpeg；项目安装的 `imageio-ffmpeg` 可以提供内置二进制，系统 PATH 中已有 FFmpeg 时会优先使用系统版本。
 
 ```bash
 git clone https://github.com/SkyNotSilent/insightcut-jianying-image-video.git
@@ -171,8 +171,8 @@ cd insightcut-jianying-image-video
 
 ```bash
 cd ai-kepu-video-server
-python3 -m venv venv
-source venv/bin/activate
+python3.11 -m venv venv311
+source venv311/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 ```
@@ -189,7 +189,7 @@ npm install
 在 `ai-kepu-video-server/` 中运行：
 
 ```bash
-source venv/bin/activate
+source venv311/bin/activate
 python -m uvicorn api_server:app --host 127.0.0.1 --port 2002 --reload
 ```
 
@@ -303,7 +303,7 @@ MiMo 通过 OpenAI 兼容的 Chat Completions 形式返回音频，不使用常�
 | 层 | 技术 |
 | --- | --- |
 | 前端 | React 19、React Router 7、Vite 8、Axios、Lucide |
-| 后端 | FastAPI、Python 3.10+ |
+| 后端 | FastAPI、Python 3.11 |
 | 数据库 | 本地 SQLite |
 | 生文 | LiteLLM Provider Registry，兼容 OpenAI / Anthropic 协议 |
 | 生图 | Agnes Image 2.1 Flash，OpenAI-compatible Images API |
@@ -336,7 +336,7 @@ insightcut-jianying-image-video/
 
 ```bash
 cd ai-kepu-video-server
-source venv/bin/activate
+source venv311/bin/activate
 python -m pytest -q
 ```
 
@@ -391,3 +391,8 @@ InsightCut 仍是一个持续迭代的、本地优先的单用户产品原型。
 ## License
 
 项目目前尚未声明开源许可证。在新增许可证前，请将本仓库视为 source-available 项目。
+
+
+## 批量预案与自动成片
+
+支持 2–50 个主题或完整文稿，批量设置独立，预案完成后可直接全选确认。确认后在后台连续生成图片、配音和 MP4，剪映草稿按需导出。每批并发默认 3、可选 1–10，FFmpeg 同时渲染 1 个。详见 [流程、接口与验收说明](docs/batch-video-workflow.md)。
