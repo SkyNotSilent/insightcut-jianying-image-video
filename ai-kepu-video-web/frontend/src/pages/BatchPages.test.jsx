@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { StrictMode } from 'react'
+import { SafeApiError } from '../lib/apiErrorSafety'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { BatchDetailPage } from './BatchDetailPage'
 import { BatchListPage } from './BatchListPage'
@@ -13,6 +15,9 @@ vi.mock('../api/task', async () => {
     listBatches: vi.fn(),
     getBatch: vi.fn(),
     cancelBatch: vi.fn(),
+    archiveBatch: vi.fn(),
+    confirmBatchProduction: vi.fn(),
+    getTaskWorkspace: vi.fn(),
     retryFailedBatchItems: vi.fn(),
   }
 })
@@ -39,6 +44,24 @@ describe('batch planning pages', () => {
     expect(parsed.duplicates).toEqual(['AI 助手'])
   })
 
+  it('recovers polling automatically after a network failure', async () => {
+    taskApi.getBatch.mockRejectedValueOnce(new SafeApiError()).mockResolvedValue(completedBatch)
+    render(<MemoryRouter initialEntries={['/batches/batch-1']}><Routes><Route path="/batches/:batchId" element={<BatchDetailPage />} /></Routes></MemoryRouter>)
+    expect(await screen.findByText(/进度暂时无法连接/)).toBeInTheDocument()
+    expect(await screen.findByText('2 / 2', {}, { timeout: 3500 })).toBeInTheDocument()
+    expect(screen.queryByText(/进度暂时无法连接/)).not.toBeInTheDocument()
+  })
+
+  it('replaces an aborted StrictMode request without showing a connection error', async () => {
+    taskApi.getBatch.mockImplementationOnce((_id, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new SafeApiError({ cancelled: true })))
+    })).mockResolvedValue(completedBatch)
+    render(<StrictMode><MemoryRouter initialEntries={['/batches/batch-1']}><Routes><Route path="/batches/:batchId" element={<BatchDetailPage />} /></Routes></MemoryRouter></StrictMode>)
+    expect(await screen.findByText('2 / 2')).toBeInTheDocument()
+    expect(screen.queryByText(/进度暂时无法连接/)).not.toBeInTheDocument()
+    expect(taskApi.getBatch).toHaveBeenCalledTimes(2)
+  })
+
   it('uses the same version-stable folding boundaries as the backend', () => {
     expect(parseTopics('ASCII\tSPACE\nascii space').duplicates).toEqual(['ascii space'])
     expect(parseTopics('Straße\nSTRASSE').duplicates).toEqual([])
@@ -54,6 +77,19 @@ describe('batch planning pages', () => {
     expect(screen.getByText('2 / 2')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: /打开工作台/ })).toHaveLength(2)
     expect(taskApi.getBatch).toHaveBeenCalledWith('batch-1', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+  })
+
+  it('selects and confirms all eligible projects without opening any preview', async () => {
+    taskApi.getBatch.mockResolvedValue({...completedBatch, items: completedBatch.items.map(i=>({...i,can_produce:true,snapshot_key:i.task_id,plan_version:2}))})
+    taskApi.confirmBatchProduction.mockResolvedValue({items:[{task_id:'task-1',outcome:'accepted'},{task_id:'task-2',outcome:'conflict',error:'预案已变化'}]})
+    render(<MemoryRouter initialEntries={['/batches/batch-1']}><Routes><Route path="/batches/:batchId" element={<BatchDetailPage />} /></Routes></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button',{name:'一键全选可生产项'}))
+    fireEvent.click(screen.getByRole('button',{name:'确认并生成 2 个视频'}))
+    await waitFor(()=>expect(taskApi.confirmBatchProduction).toHaveBeenCalledWith('batch-1',[
+      {task_id:'task-1',snapshot_key:'task-1',plan_version:2},{task_id:'task-2',snapshot_key:'task-2',plan_version:2}
+    ]))
+    expect(taskApi.getTaskWorkspace).not.toHaveBeenCalled()
+    expect(await screen.findByText(/预案已变化/)).toBeInTheDocument()
   })
 
   it('requests cancellation and exposes the persisted cancelled state', async () => {
@@ -74,7 +110,7 @@ describe('batch planning pages', () => {
     const user = userEvent.setup()
     render(<MemoryRouter initialEntries={['/batches/batch-1']}><Routes><Route path="/batches/:batchId" element={<BatchDetailPage />} /></Routes></MemoryRouter>)
 
-    await user.click(await screen.findByRole('button', { name: '取消批次' }))
+    await user.click(await screen.findByRole('button', { name: '停止预案生成' }))
     await waitFor(() => expect(taskApi.cancelBatch).toHaveBeenCalledWith('batch-1'))
     expect((await screen.findAllByText('已取消')).length).toBeGreaterThanOrEqual(1)
   })
@@ -84,6 +120,20 @@ describe('batch planning pages', () => {
     render(<MemoryRouter><BatchListPage /></MemoryRouter>)
     expect(await screen.findByText('还没有批量预案')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '创建第一个批次' })).toBeEnabled()
+  })
+
+  it('filters archived batches and restores a batch without deleting it', async () => {
+    taskApi.listBatches.mockResolvedValue({items:[]})
+    const list = render(<MemoryRouter><BatchListPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button',{name:'已归档'}))
+    expect(await screen.findByText('还没有已归档批次')).toBeInTheDocument()
+    expect(taskApi.listBatches).toHaveBeenLastCalledWith({limit:100,archived:true},expect.anything())
+    list.unmount()
+    taskApi.getBatch.mockResolvedValue({...completedBatch,archived_at:'2026-09-07 02:00:00'})
+    taskApi.archiveBatch.mockResolvedValue(completedBatch)
+    render(<MemoryRouter initialEntries={['/batches/batch-1']}><Routes><Route path="/batches/:batchId" element={<BatchDetailPage />} /></Routes></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button',{name:'恢复批次'}))
+    await waitFor(()=>expect(taskApi.archiveBatch).toHaveBeenCalledWith('batch-1',false))
   })
 
   it('restarts polling after retrying a terminal batch with failures', async () => {

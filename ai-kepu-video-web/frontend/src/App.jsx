@@ -1,17 +1,18 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { BrandNavigation } from './components/BrandNavigation'
 import { GlobalTaskBar } from './components/GlobalTaskBar'
 import { ToastViewport } from './components/ToastViewport'
-import { ExportPage } from './pages/ExportPage'
-import { ManuscriptPage } from './pages/ManuscriptPage'
-import { ProjectAssetsPage } from './pages/ProjectAssetsPage'
-import { ProjectAssetDetailPage } from './pages/ProjectAssetDetailPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { TemplatesPage } from './pages/TemplatesPage'
-import { WorkspacePage } from './pages/WorkspacePage'
-import { BatchListPage } from './pages/BatchListPage'
-import { BatchDetailPage } from './pages/BatchDetailPage'
+const ExportPage = lazy(() => import('./pages/ExportPage').then(module => ({ default: module.ExportPage })))
+const ManuscriptPage = lazy(() => import('./pages/ManuscriptPage').then(module => ({ default: module.ManuscriptPage })))
+const ProjectAssetsPage = lazy(() => import('./pages/ProjectAssetsPage').then(module => ({ default: module.ProjectAssetsPage })))
+const ProjectAssetDetailPage = lazy(() => import('./pages/ProjectAssetDetailPage').then(module => ({ default: module.ProjectAssetDetailPage })))
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(module => ({ default: module.SettingsPage })))
+const TemplatesPage = lazy(() => import('./pages/TemplatesPage').then(module => ({ default: module.TemplatesPage })))
+const WorkspacePage = lazy(() => import('./pages/WorkspacePage').then(module => ({ default: module.WorkspacePage })))
+const BatchListPage = lazy(() => import('./pages/BatchListPage').then(module => ({ default: module.BatchListPage })))
+const BatchDetailPage = lazy(() => import('./pages/BatchDetailPage').then(module => ({ default: module.BatchDetailPage })))
 import { getDraft } from './utils/projectDrafts'
 
 export default function App() {
@@ -29,6 +30,7 @@ function AppSurface() {
       <BrandNavigation />
       <div className="app-main">
         <GlobalTaskBar />
+        <Suspense fallback={<main role="status" className="delivery-loading">正在打开页面…</main>}>
         <Routes>
           <Route path="/" element={<Navigate to="/manuscript" replace />} />
           <Route path="/manuscript/:draftId?" element={<ManuscriptPage />} />
@@ -46,6 +48,7 @@ function AppSurface() {
           <Route path="/result/:taskId" element={<ResultRedirect />} />
           <Route path="*" element={<Navigate to="/manuscript" replace />} />
         </Routes>
+        </Suspense>
       </div>
       <ToastViewport />
     </div>

@@ -9,8 +9,8 @@ const inspector = readFileSync(new URL('../src/components/WorkspaceInspector.jsx
 test('the bottom confirmation action saves the selected voice instead of only reopening settings', () => {
   assert.match(workspacePage, /<WorkspaceActionBar[\s\S]*?onConfirmVoice=\{confirmVoice\}/)
   assert.doesNotMatch(workspacePage, /onConfirmVoice=\{\(\) => \{ setWorkspaceSettingsOpen\(true\)/)
-  assert.match(actionBar, /onClick=\{onConfirmVoice\}/)
-  assert.match(actionBar, /正在验证音色/)
+  assert.match(actionBar, /onClick=\{onGenerateAssets\}/)
+  assert.match(actionBar, /试听与预览均可选/)
 })
 
 test('voice confirmation validates the TTS path and is reflected immediately', () => {

@@ -13,7 +13,7 @@ import {
   Square,
 } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router'
-import { cancelExportJob, createExport, getExportJob, getExportState, getMaterialsDownloadUrl, selectDraftFolder } from '../api/task'
+import { revealExportDirectory, cancelExportJob, createExport, getExportJob, getExportState, getMaterialsDownloadUrl, selectDraftFolder } from '../api/task'
 import { PollingFailureNotice } from '../components/PollingFailureNotice'
 import { ProjectStepBar } from '../components/ProjectStepBar'
 import { EmptyState, LoadingState } from '../components/StatusStates'
@@ -23,6 +23,7 @@ import { toast } from '../lib/toast'
 import { materialPackageSummary, resolveApiDownloadUrl } from './exportMaterials'
 import { buildExportPollingKey, isActiveExportJob } from './exportPolling'
 import './delivery-pages.css'
+import { flushStoredWorkspaceEdits } from './flushWorkspaceEdits'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:2002'
 
@@ -64,6 +65,7 @@ export function ExportPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [loadedTaskId, setLoadedTaskId] = useState(null)
+  const [collisionPolicy, setCollisionPolicy] = useState('copy')
   const [state, setState] = useState(null)
   const [jobs, setJobs] = useState({ mp4: null, materials: null, draft: null, draft_local: null })
   const [extractPath, setExtractPath] = useState(() => (
@@ -250,10 +252,11 @@ export function ExportPage() {
       Object.assign(payload, {
         draft_root: pathCheck.normalized,
         target_os: targetOS,
-        overwrite: true,
+        collision_policy: collisionPolicy,
       })
     }
     try {
+      await flushStoredWorkspaceEdits(expectedTaskId)
       const job = await createExport(expectedTaskId, payload)
       if (activeTaskIdRef.current !== expectedTaskId) return
       setJobs(current => ({ ...current, [target]: job }))
@@ -261,7 +264,7 @@ export function ExportPage() {
     } catch (error) {
       if (activeTaskIdRef.current !== expectedTaskId) return
       console.error('创建导出任务失败', error)
-      toast.error(error?.response?.data?.detail || '创建导出失败')
+      toast.error(error?.response?.data?.detail || error?.message || '创建导出失败')
     }
   }
 
@@ -279,11 +282,27 @@ export function ExportPage() {
     }
   }
 
-  const downloadMp4 = () => {
+  const canDownloadSavedOutput = async () => {
+    try {
+      if (await flushStoredWorkspaceEdits(taskId)) {
+        await loadState({ silent: true })
+        toast.info('编辑已保存，请检查更新后的导出状态')
+        return false
+      }
+      return true
+    } catch (error) {
+      toast.error(error?.message || '请先回工作台处理未保存的编辑')
+      return false
+    }
+  }
+
+  const downloadMp4 = async () => {
+    if (!await canDownloadSavedOutput()) return
     if (state?.outputs?.mp4?.available) window.open(`${API_BASE}/ai/native/video/kepu/tasks/${taskId}/download-mp4`, '_blank')
   }
 
-  const downloadDraft = () => {
+  const downloadDraft = async () => {
+    if (!await canDownloadSavedOutput()) return
     const query = new URLSearchParams({ target_os: targetOS })
     if (pathCheck.valid && pathCheck.normalized) {
       saveExtractPath(pathCheck.normalized)
@@ -293,7 +312,8 @@ export function ExportPage() {
     window.open(`${API_BASE}/ai/native/video/kepu/tasks/${taskId}/download?${query.toString()}`, '_blank')
   }
 
-  const downloadMaterials = () => {
+  const downloadMaterials = async () => {
+    if (!await canDownloadSavedOutput()) return
     const materials = state?.outputs?.materials || {}
     const url = jobs.materials?.result?.download_url || materials.download_url || getMaterialsDownloadUrl(taskId, materials.snapshot_key)
     if (!triggerFileDownload(url)) toast.error('素材包下载地址不可用，请重新整理')
@@ -378,7 +398,10 @@ export function ExportPage() {
           <fieldset className="delivery-segmented"><legend>剪映所在系统</legend><button type="button" aria-pressed={targetOS === 'mac'} className={targetOS === 'mac' ? 'is-active' : ''} onClick={() => setTargetOS('mac')}>Mac</button><button type="button" aria-pressed={targetOS === 'windows'} className={targetOS === 'windows' ? 'is-active' : ''} onClick={() => setTargetOS('windows')}>Windows</button></fieldset>
           {jobs.draft_local?.result?.draft_path && <p className="delivery-note"><strong>已写入：</strong>{jobs.draft_local.result.draft_path}</p>}
           {jobs.draft_local?.result?.warnings?.length > 0 && <div className="delivery-message is-warning"><CircleAlert size={16} aria-hidden="true" /><div>{jobs.draft_local.result.warnings.map(warning => <span key={warning}>{warning}</span>)}</div></div>}
-          <div className="export-job-pair"><JobState job={jobs.draft_local} fallback="尚未写入本地剪映" /><JobState job={jobs.draft} fallback={draftAvailable ? '草稿 ZIP 可下载' : '尚未准备草稿 ZIP'} /></div>
+          <div className="export-job-pair"><label>同名草稿处理<select value={collisionPolicy} onChange={event => setCollisionPolicy(event.target.value)}><option value="copy">另存副本，保留原草稿</option><option value="backup_replace">备份原草稿后替换</option></select></label>
+          {jobs.draft_local?.result?.backup_path && <p>原草稿备份：{jobs.draft_local.result.backup_path} <button onClick={() => revealExportDirectory(taskId, jobs.draft_local.job_id, true).catch(() => {})}>打开备份位置</button></p>}
+          {jobs.draft_local?.result?.draft_path && <p>实际草稿位置：{jobs.draft_local.result.draft_path}</p>}
+          <JobState job={jobs.draft_local} fallback="尚未写入本地剪映" /><JobState job={jobs.draft} fallback={draftAvailable ? '草稿 ZIP 可下载' : '尚未准备草稿 ZIP'} /></div>
           <div className="export-actions">
             <button className="button button-primary" type="button" disabled={isBusy(jobs.draft_local) || !pathCheck.valid || !canBuildRenderedOutputs} onClick={() => startExport('draft_local')}>{isBusy(jobs.draft_local) ? <LoaderCircle className="spin" size={16} aria-hidden="true" /> : <HardDriveDownload size={16} aria-hidden="true" />}{isBusy(jobs.draft_local) ? '写入中...' : '写入剪映'}</button>
             {draftAvailable ? <button className="button button-secondary" type="button" onClick={downloadDraft}><Download size={16} aria-hidden="true" />下载草稿 ZIP</button> : <button className="button button-secondary" type="button" disabled={isBusy(jobs.draft) || !canBuildRenderedOutputs} onClick={() => startExport('draft')}>{isBusy(jobs.draft) ? <LoaderCircle className="spin" size={16} aria-hidden="true" /> : <FileArchive size={16} aria-hidden="true" />}{isBusy(jobs.draft) ? '准备中...' : '准备草稿 ZIP'}</button>}

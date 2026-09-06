@@ -1,12 +1,15 @@
-import { Download, FileStack, FileText, FolderKanban, LayoutDashboard, LayoutTemplate, Settings } from 'lucide-react'
+import { MoreHorizontal, Download, FileStack, FileText, FolderKanban, LayoutDashboard, LayoutTemplate, Settings } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { NavLink, useLocation } from 'react-router'
+import { Modal } from './Modal'
 import { PROJECT_SELECTION_EVENT, projectIdFromPath, readSelectedProject } from '../lib/projectSelection'
 
 const BRAND_MESSAGES = ['AI 视频工作台', '文稿变成视频', '自由二次编辑', '导入剪映草稿']
 
 export function BrandNavigation() {
   const location = useLocation()
+  const [moreOpen, setMoreOpen] = useState(false)
+  useEffect(() => setMoreOpen(false), [location.pathname, location.search])
   const [selectedProject, setSelectedProject] = useState(readSelectedProject)
   const [messageIndex, setMessageIndex] = useState(0)
   const workspaceMatch = location.pathname.match(/^\/workspace\/([^/]+)/)
@@ -19,7 +22,7 @@ export function BrandNavigation() {
     { to: activeTaskId ? `/workspace/${activeTaskId}` : '/assets?open=workspace', label: '工作台', icon: LayoutDashboard },
     { to: activeTaskId ? `/export/${activeTaskId}` : '/assets?open=export', label: '导出中心', icon: Download },
     { to: '/assets', label: '项目资产', icon: FolderKanban },
-    { to: '/templates', label: '模板库', icon: LayoutTemplate },
+    { to: '/templates', label: '预案模板', icon: LayoutTemplate },
     { to: workspaceMatch ? `/workspace/${workspaceMatch[1]}/settings` : '/settings', label: '设置', icon: Settings },
   ], [activeTaskId, workspaceMatch])
 
@@ -69,11 +72,15 @@ export function BrandNavigation() {
       {navigationItems.map(({ to, label, icon: Icon }) => <NavLink
         key={label}
         to={to}
-        className={({ isActive }) => `rail-nav-link${isActive ? ' is-active' : ''}`}
+        className={({ isActive }) => `rail-nav-link${['批量预案', '预案模板', '设置'].includes(label) ? ' rail-mobile-secondary' : ''}${isActive ? ' is-active' : ''}`}
       >
         <span><Icon size={19} aria-hidden="true" /></span>
         <small>{label}</small>
       </NavLink>)}
+      <button type="button" className="rail-nav-link rail-more" onClick={() => setMoreOpen(true)} aria-expanded={moreOpen} aria-label="更多导航"><span><MoreHorizontal size={19} /></span><small>更多</small></button>
     </nav>
+    <Modal open={moreOpen} title="更多功能" onClose={() => setMoreOpen(false)}>
+      <nav className="rail-more-links" aria-label="更多功能">{navigationItems.filter(item => ['批量预案', '预案模板', '设置'].includes(item.label)).map(({ to, label }) => <NavLink key={label} to={to} onClick={() => setMoreOpen(false)}>{label}</NavLink>)}</nav>
+    </Modal>
   </aside>
 }

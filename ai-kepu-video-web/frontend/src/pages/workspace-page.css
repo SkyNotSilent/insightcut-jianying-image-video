@@ -1139,3 +1139,18 @@ button.workspace-preview-row:hover { background: var(--color-accent-soft); }
   from { opacity: .55; transform: translateY(3px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+.workspace-mobile-stage { display: none; }
+@media (max-width: 720px) {
+  .workspace-actionbar { bottom: var(--mobile-navigation-height, 68px); }
+  .workspace-mobile-stage { display: block; padding: 10px; width: 100%; text-align: left; border: 0; background: var(--color-surface-raised); }
+  .workspace-stage-navigation > ol:not(.is-expanded) { display: none; }
+  .workspace-stage-navigation > ol.is-expanded { display: grid; grid-template-columns: 1fr 1fr; }
+  .workspace-stage-navigation > ol.is-expanded strong, .workspace-stage-navigation > ol.is-expanded small { white-space: normal; }
+}
+
+.workspace-conflicts { position: fixed; z-index: 120; right: 1rem; bottom: calc(var(--mobile-navigation-height, 0px) + 1rem); width: min(440px, calc(100vw - 2rem)); max-height: 55vh; overflow: auto; padding: 1rem; background: var(--color-surface-raised); border: 1px solid var(--color-warning); border-radius: 12px; box-shadow: 0 8px 36px color-mix(in srgb, var(--color-ink) 14%, transparent); }
+.workspace-conflicts p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.workspace-conflicts button { margin: .3rem; }
+
+.workspace-sync-row button.workspace-save-retry, .workspace-sync-row button.workspace-plan-restore { display: inline-flex; }

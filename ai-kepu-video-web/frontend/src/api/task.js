@@ -108,11 +108,11 @@ export function updateConfig(data) {
   })
 }
 
-export function getConfigReadiness({ voiceType, signal } = {}) {
+export function getConfigReadiness({ voiceType, signal, phase = 'full' } = {}) {
   return request({
     url: '/ai/native/video/kepu/config/readiness',
     method: 'get',
-    params: voiceType ? { voice_type: voiceType } : {},
+    params: { phase, ...(voiceType ? { voice_type: voiceType } : {}) },
     suppressToast: true,
     signal,
     timeout: 10000,
@@ -191,6 +191,8 @@ export function createTask(data) {
 export function createBatch(data) {
   return request({ url: '/ai/native/video/kepu/batches', method: 'post', data })
 }
+
+export const archiveBatch = (batchId, archived) => request({ url: `/ai/native/video/kepu/batches/${batchId}/archive`, method: 'post', data: { archived } })
 
 export function listBatches(params = {}, { signal } = {}) {
   return request({
@@ -568,3 +570,21 @@ export function updateProductionTemplate(templateId, data) {
 export function deleteProductionTemplate(templateId) {
   return request({ url: `/ai/native/video/kepu/templates/${templateId}`, method: 'delete' })
 }
+
+export async function restoreTaskPlan(taskId, payload) {
+  return request({ url: `/ai/native/video/kepu/tasks/${taskId}/plan/restore`, method: 'post', data: payload })
+}
+
+export function getProjectCatalog(params) {
+  return request({ url: '/ai/native/video/kepu/project-catalog', method: 'get', params })
+}
+
+export function revealExportDirectory(taskId, jobId, backup = false) {
+  return request({ url: `/ai/native/video/kepu/tasks/${taskId}/exports/${jobId}/reveal`, method: 'post', data: { backup } })
+}
+
+export const confirmProduction = (taskId, data) => request({url:`/ai/native/video/kepu/tasks/${taskId}/confirm-production`,method:'post',data})
+export const cancelProduction = taskId => request({url:`/ai/native/video/kepu/tasks/${taskId}/cancel-production`,method:'post'})
+export const confirmBatchProduction = (batchId, items) => request({url:`/ai/native/video/kepu/batches/${batchId}/confirm-production`,method:'post',data:{items},timeout:120000})
+export const cancelBatchProduction = batchId => request({url:`/ai/native/video/kepu/batches/${batchId}/cancel-production`,method:'post'})
+export const resolveInputMode = (taskId,input_mode) => request({url:`/ai/native/video/kepu/tasks/${taskId}/input-mode`,method:'patch',data:{input_mode}})

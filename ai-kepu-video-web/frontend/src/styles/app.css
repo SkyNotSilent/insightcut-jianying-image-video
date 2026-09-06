@@ -287,3 +287,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .modal-footer { display: grid; grid-template-columns: 1fr; }
   .modal-footer .button { width: 100%; }
 }
+
+.rail-more { display: none; }
+.rail-more-links { display: grid; gap: 12px; }
+.rail-more-links a { padding: 14px; border: 1px solid var(--color-border); border-radius: 8px; }
+.assets-pagination { display: flex; justify-content: center; align-items: center; gap: 16px; padding: 20px 0; }
+@media (max-width: 720px) {
+  :root { --mobile-navigation-height: calc(68px + env(safe-area-inset-bottom, 0px)); }
+  .app-main { padding-bottom: calc(var(--mobile-navigation-height) + 24px); }
+  .app-rail { height: var(--mobile-navigation-height); padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); }
+  .rail-navigation { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .rail-mobile-secondary { display: none; }
+  .rail-more { display: flex; }
+  .rail-nav-link small { font-size: 11px; }
+  .assets-pagination { gap: 8px; font-size: 12px; }
+}

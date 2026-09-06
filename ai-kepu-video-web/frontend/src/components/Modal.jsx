@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from 'react'
+import { useLayoutEffect, useId, useRef } from 'react'
 import { X } from 'lucide-react'
 
 export function Modal({ open, title, children, onClose, footer }) {
@@ -8,7 +8,7 @@ export function Modal({ open, title, children, onClose, footer }) {
 
   closeRef.current = onClose
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return undefined
     const previouslyFocused = document.activeElement
     const dialog = dialogRef.current
@@ -20,7 +20,7 @@ export function Modal({ open, title, children, onClose, footer }) {
     ) || []).filter(element => !element.hasAttribute('hidden') && element.getAttribute('aria-hidden') !== 'true')
 
     const initialTarget = dialog?.querySelector('[data-modal-initial-focus]') || focusable()[0] || dialog
-    window.requestAnimationFrame(() => initialTarget?.focus?.())
+    initialTarget?.focus?.()
 
     const onKeyDown = event => {
       if (event.key === 'Escape') {

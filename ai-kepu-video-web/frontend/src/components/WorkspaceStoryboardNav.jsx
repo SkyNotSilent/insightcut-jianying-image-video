@@ -21,6 +21,8 @@ export function WorkspaceStoryboardNav({
   stage,
   activeStyle,
   saveMessage,
+  onRetrySave,
+  onRestore,
   editable,
   busyAction,
   segments,
@@ -48,6 +50,8 @@ export function WorkspaceStoryboardNav({
         <div className="workspace-sync-row">
           <span className={`workspace-status-pill is-${stage.tone}`}>{stage.title}</span>
           <span className={`workspace-save-state${saveMessage.includes('正在') || saveMessage.includes('等待') ? ' is-saving' : saveMessage.includes('失败') ? ' is-error' : ' is-synced'}`}><Save size={14} />{saveMessage}</span>
+          {saveMessage !== '已同步' && <button className="workspace-save-retry" type="button" onClick={onRetrySave}>重试保存</button>}
+          {workspace.can_restore_plan && <button className="workspace-plan-restore" type="button" onClick={onRestore} disabled={!editable || Boolean(busyAction)}>恢复拆分前版本</button>}
           <button type="button" onClick={onResegment} disabled={!editable || busyAction === 'resegment'}><RefreshCw size={14} />重新拆分</button>
         </div>
       </header>

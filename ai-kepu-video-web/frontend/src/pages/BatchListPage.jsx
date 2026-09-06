@@ -6,7 +6,7 @@ import './batch-pages.css'
 
 const statusCopy = {
   queued: ['排队中', 'queued'], running: ['生成预案中', 'running'],
-  completed: ['全部待确认', 'success'], completed_with_errors: ['部分失败', 'warning'],
+  completed: ['预案已完成', 'success'], completed_with_errors: ['部分失败', 'warning'],
   cancelled: ['已取消', 'muted'],
 }
 
@@ -21,21 +21,24 @@ export function BatchListPage() {
   const [batches, setBatches] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [archived, setArchived] = useState(false)
 
   const load = useCallback(async signal => {
     try {
-      const result = await listBatches({ limit: 100 }, { signal })
+      const result = await listBatches({ limit: 100, archived }, { signal })
+      if (signal?.aborted) return
       setBatches(result?.items || [])
       setError('')
     } catch (requestError) {
-      if (requestError?.name !== 'CanceledError') setError('批次列表暂时无法连接，请检查后端服务。')
+      if (!signal?.aborted && requestError?.kind !== 'cancelled' && requestError?.name !== 'CanceledError') setError('批次列表暂时无法连接，请检查后端服务。')
     } finally {
-      setLoading(false)
+      if (!signal?.aborted) setLoading(false)
     }
-  }, [])
+  }, [archived])
 
   useEffect(() => {
     const controller = new AbortController()
+    setLoading(true)
     let timer
     const tick = async () => {
       await load(controller.signal)
@@ -50,10 +53,12 @@ export function BatchListPage() {
       <div><p>Batch planning</p><h1>批量预案</h1><span>每个主题只生成文稿、分镜和画面提示词，统一停在人工确认。</span></div>
       <button type="button" className="button button-primary" onClick={() => navigate('/manuscript?mode=batch')}><Plus size={16} />新建批次</button>
     </header>
+    <nav className="batch-preview-tabs" aria-label="批次归档筛选"><button aria-pressed={!archived} onClick={()=>setArchived(false)}>当前批次</button><button aria-pressed={archived} onClick={()=>setArchived(true)}>已归档</button></nav>
+    <p>归档只收起批次，项目、文稿、素材和视频继续保留；正在执行的任务也会继续。</p>
 
     {error ? <section className="batch-alert" role="alert"><span>{error}</span><button type="button" onClick={() => { setLoading(true); load() }}><RefreshCw size={15} />重试</button></section> : null}
     {loading ? <section className="batch-empty" aria-live="polite">正在读取批次…</section> : batches.length === 0 ? <section className="batch-empty">
-      <FileStack size={34} aria-hidden="true" /><strong>还没有批量预案</strong><p>准备 2–50 个主题，一次生成可逐项确认的预案。</p><button type="button" className="button button-primary" onClick={() => navigate('/manuscript?mode=batch')}>创建第一个批次</button>
+      <FileStack size={34} aria-hidden="true" /><strong>{archived?'还没有已归档批次':'还没有批量预案'}</strong><p>{archived?'归档后的批次会显示在这里，可随时查看和恢复。':'准备 2–50 个主题或完整文稿，一次生成可逐项确认的预案。'}</p>{!archived&&<button type="button" className="button button-primary" onClick={() => navigate('/manuscript?mode=batch')}>创建第一个批次</button>}
     </section> : <section className="batch-list" aria-label="批次列表">
       {batches.map(batch => {
         const [label, tone] = statusCopy[batch.status] || [batch.status, 'muted']

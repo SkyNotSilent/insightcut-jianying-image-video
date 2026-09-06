@@ -80,6 +80,7 @@ export function SettingsPage({ embedded = false, onClose }) {
   const [saving, setSaving] = useState(false)
   const [testingTts, setTestingTts] = useState(false)
   const [ttsTestUrl, setTtsTestUrl] = useState('')
+  const configRevisionRef = useRef(null)
   const [form, setForm] = useState(() => normalizeConfig())
   const [llmProviders, setLlmProviders] = useState([])
   const [localModels, setLocalModels] = useState([])
@@ -93,6 +94,10 @@ export function SettingsPage({ embedded = false, onClose }) {
   const [cloneConsent, setCloneConsent] = useState(false)
   const [cloneFile, setCloneFile] = useState(null)
   const [cloneBusy, setCloneBusy] = useState('')
+  const [focusedClone, setFocusedClone] = useState('')
+  useEffect(() => {
+    if (focusedClone) document.getElementById(`clone-${focusedClone}`)?.focus()
+  }, [focusedClone])
   const [cloneToDelete, setCloneToDelete] = useState(null)
   const [recording, setRecording] = useState(false)
   const audioRef = useRef(null)
@@ -122,6 +127,7 @@ export function SettingsPage({ embedded = false, onClose }) {
           .catch(error => ({ data: null, error })),
       ])
       if (loadGeneration !== loadGenerationRef.current) return
+      configRevisionRef.current = config.revision
       const normalizedVoices = normalizeVoiceCatalog(catalog)
       const normalizedConfig = normalizeConfig(config)
       const normalized = {
@@ -527,9 +533,11 @@ export function SettingsPage({ embedded = false, onClose }) {
     if (!file) return
     setCloneBusy(`replace:${cloneId}`)
     try {
-      await replaceVoiceCloneReference(cloneId, file)
-      toast.success('参考音频已替换，请重新生成试听')
+      const updated = await replaceVoiceCloneReference(cloneId, file)
+      setFocusedClone('')
+      toast.success(updated.clone_id !== cloneId ? '已创建新录音音色，旧任务继续使用原音色；请生成试听' : '参考音频已替换，请重新生成试听')
       await refreshVoiceData()
+      setFocusedClone(updated.clone_id)
     } catch (error) {
       toast.error(error?.response?.data?.detail || '替换参考音频失败')
     } finally {
@@ -567,7 +575,8 @@ export function SettingsPage({ embedded = false, onClose }) {
     }
     setSaving(true)
     try {
-      const saved = await updateConfig(normalized)
+      const saved = await updateConfig({ ...normalized, revision: configRevisionRef.current })
+      configRevisionRef.current = saved.revision
       const savedConfig = normalizeConfig(saved || normalized)
       currentLlmProviderRef.current = savedConfig.llm.provider
       setForm(savedConfig)
@@ -679,7 +688,7 @@ export function SettingsPage({ embedded = false, onClose }) {
                 <button className="button button-primary" type="button" disabled={cloneBusy === 'create'} onClick={createClone}>{cloneBusy === 'create' ? <LoaderCircle className="spin" size={15} /> : <Upload size={15} />}创建并生成试听</button>
               </div>
               <div className="clone-record-list">
-                {clones.filter(clone => clone.status !== 'hidden').map(clone => <article key={clone.clone_id}><div><strong>{clone.name}</strong><small>{clone.status === 'ready' ? '已就绪' : clone.status === 'failed' ? `试听失败·${clone.error_message || '可重试'}` : '待生成试听'}{clone.duration ? ` · ${Number(clone.duration).toFixed(1)}s` : ''}</small></div><span className="clone-record-actions"><button type="button" disabled={cloneBusy === `preview:${clone.clone_id}`} onClick={() => retryClonePreview(clone)}><Volume2 size={14} />试听</button><button type="button" disabled={clone.status !== 'ready'} onClick={() => patchClone(clone.clone_id, { is_enabled: !clone.is_enabled })}>{clone.is_enabled ? '停用' : '启用'}</button><button type="button" onClick={() => { const name = window.prompt('修改音色名称', clone.name); if (name?.trim()) patchClone(clone.clone_id, { name: name.trim() }) }}><Pencil size={14} />重命名</button><label><RefreshCw size={14} />替换<input type="file" accept="audio/wav,audio/mpeg,audio/webm,.wav,.mp3,.webm" onChange={event => replaceClone(clone.clone_id, event.target.files?.[0])} /></label><button type="button" onClick={() => setCloneToDelete(clone)}><Trash2 size={14} />删除</button></span></article>)}
+                {clones.filter(clone => clone.status !== 'hidden').map(clone => <article key={clone.clone_id} id={`clone-${clone.clone_id}`} tabIndex={-1}><div><strong>{clone.name}</strong><small>{clone.status === 'ready' ? '已就绪' : clone.status === 'failed' ? `试听失败·${clone.error_message || '可重试'}` : '待生成试听'}{clone.duration ? ` · ${Number(clone.duration).toFixed(1)}s` : ''}</small></div><span className="clone-record-actions"><button type="button" disabled={cloneBusy === `preview:${clone.clone_id}`} onClick={() => retryClonePreview(clone)}><Volume2 size={14} />试听</button><button type="button" disabled={clone.status !== 'ready'} onClick={() => patchClone(clone.clone_id, { is_enabled: !clone.is_enabled })}>{clone.is_enabled ? '停用' : '启用'}</button><button type="button" onClick={() => { const name = window.prompt('修改音色名称', clone.name); if (name?.trim()) patchClone(clone.clone_id, { name: name.trim() }) }}><Pencil size={14} />重命名</button><label><RefreshCw size={14} />替换<input type="file" accept="audio/wav,audio/mpeg,audio/webm,.wav,.mp3,.webm" onChange={event => replaceClone(clone.clone_id, event.target.files?.[0])} /></label><button type="button" onClick={() => setCloneToDelete(clone)}><Trash2 size={14} />删除</button></span></article>)}
                 {!clones.filter(clone => clone.status !== 'hidden').length ? <EmptyStateCard variant="voice" eyebrow="本地音色" title="还没有克隆音色" description="使用上方表单上传或录制一段已获授权的参考音频。" compact /> : null}
               </div>
             </div> : null}

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { ArrowRight, FileText, ImageOff, MoreHorizontal, Plus, RotateCcw, Search, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router'
-import { deleteTask, getSegments, listTasks } from '../api/task'
+import { deleteTask, getProjectCatalog } from '../api/task'
 import { ConfirmDialog } from '../components/Modal'
 import { EmptyState, LoadingState } from '../components/StatusStates'
 import { toast } from '../lib/toast'
@@ -15,13 +15,14 @@ import './delivery-pages.css'
 const STATUS_FILTERS = [
   { key: 'all', label: '全部项目', tone: 'info' },
   { key: 'draft', label: '草稿', tone: 'warning' },
+  { key: 'waiting', label: '待确认', tone: 'warning' },
   { key: 'processing', label: '生成中', tone: 'info' },
   { key: 'interrupted', label: '可继续', tone: 'warning' },
   { key: 'completed', label: '已完成', tone: 'success' },
   { key: 'recoverable_assets', label: '失败可恢复', tone: 'danger' },
 ]
 const DURATION_FILTERS = ['全部时长', '1 分钟以内', '1-3 分钟', '3-5 分钟', '5 分钟以上']
-const DEFAULT_VISIBLE_STATUSES = new Set(['processing', 'interrupted', 'completed', 'export_ready', 'recoverable_assets'])
+const DEFAULT_VISIBLE_STATUSES = new Set(['waiting', 'processing', 'interrupted', 'completed', 'export_ready', 'recoverable_assets'])
 
 function secondsToLabel(value) {
   const seconds = Math.round(Number(value) || 0)
@@ -58,7 +59,11 @@ export function ProjectAssetsPage() {
   const [durationFilter, setDurationFilter] = useState('全部时长')
   const [sortMode, setSortMode] = useState('updated')
   const [remoteTasks, setRemoteTasks] = useState([])
-  const [taskSegments, setTaskSegments] = useState({})
+  const taskSegments = {}
+  const [page, setPage] = useState(1)
+  const [catalog, setCatalog] = useState({ total: 0, counts: {} })
+  const [loadError, setLoadError] = useState('')
+  const loadSequence = useRef(0)
   const [localDrafts, setLocalDrafts] = useState([])
   const [brokenCovers, setBrokenCovers] = useState({})
   const [fallbackCovers, setFallbackCovers] = useState({})
@@ -67,38 +72,39 @@ export function ProjectAssetsPage() {
   const [deletingId, setDeletingId] = useState(null)
 
   const loadProjects = useCallback(async () => {
+    const sequence = ++loadSequence.current
     setLoading(true)
+    setLoadError('')
     setLocalDrafts(listDrafts())
     try {
-      const tasks = await listTasks(undefined, 80, 0)
-      const taskList = (Array.isArray(tasks) ? tasks : []).filter(task => task.status !== 'deleting')
-      setRemoteTasks(taskList)
-      const segmentEntries = await Promise.all(taskList.map(async task => {
-        try {
-          return [task.task_id, await getSegments(task.task_id)]
-        } catch {
-          return [task.task_id, []]
-        }
-      }))
-      const nextSegments = Object.fromEntries(segmentEntries)
-      setTaskSegments(nextSegments)
-      const missing = taskList.filter(task => !normalizeMediaUrl(task.cover_image_url)).slice(0, 24)
-      setFallbackCovers(current => ({
-        ...current,
-        ...Object.fromEntries(missing
-          .map(task => [task.task_id, firstSegmentCover(nextSegments[task.task_id])])
-          .filter(([, cover]) => cover)),
-      }))
+      if (statusFilter === 'draft') return
+      const durations = { '1 分钟以内': 'under1', '1-3 分钟': '1to3', '3-5 分钟': '3to5', '5 分钟以上': 'over5' }
+      const result = await getProjectCatalog({ page, limit: 40, q: search, status: statusFilter, style: styleFilter, duration: durations[durationFilter] || '', sort: sortMode })
+      if (sequence !== loadSequence.current) return
+      setRemoteTasks(result.items || [])
+      setCatalog(result)
+      if (page > 1 && !result.items?.length && result.total > 0) setPage(Math.max(1, Math.ceil(result.total / 40)))
     } catch (error) {
-      console.warn('加载任务列表失败', error)
-      setRemoteTasks([])
-      toast.error('加载云端项目失败，本地草稿仍可使用')
+      if (sequence !== loadSequence.current) return
+      setLoadError('加载本地项目失败，请重试；本地文稿仍可使用')
+      toast.error('加载本地项目失败，请重试')
     } finally {
-      setLoading(false)
+      if (sequence === loadSequence.current) setLoading(false)
     }
-  }, [])
+  }, [page, search, statusFilter, styleFilter, durationFilter, sortMode])
 
-  useEffect(() => { loadProjects() }, [loadProjects])
+  useEffect(() => {
+    const timer = window.setTimeout(loadProjects, 180)
+    return () => { window.clearTimeout(timer); loadSequence.current += 1 }
+  }, [loadProjects])
+
+  useEffect(() => {
+    if (!remoteTasks.some(task => task.status === 'deleting')) return
+    const timer = window.setInterval(loadProjects, 1500)
+    return () => window.clearInterval(timer)
+  }, [remoteTasks, loadProjects])
+
+  const changeFilter = setter => value => { setPage(1); setter(value) }
 
   const projects = useMemo(() => {
     const drafts = localDrafts
@@ -123,7 +129,7 @@ export function ProjectAssetsPage() {
       })
     const tasks = remoteTasks.map(task => {
       const segments = taskSegments[task.task_id] || []
-      const state = deriveTaskState({ task, segments })
+      const state = task.display_state ? { key: task.display_state, label: task.display_label, tone: task.display_tone, actionLabel: task.action_label } : deriveTaskState({ task, segments })
       const durationSeconds = taskDurationSeconds(task, segments)
       return {
         id: task.task_id,
@@ -149,30 +155,29 @@ export function ProjectAssetsPage() {
     const keyword = search.trim().toLowerCase()
     return projects
       .filter(project => {
+        if (project.type === 'task') return statusFilter !== 'draft'
         if (statusFilter === 'draft') return project.type === 'draft'
         if (project.type === 'draft') return false
         if (statusFilter === 'all') return DEFAULT_VISIBLE_STATUSES.has(project.status)
         if (statusFilter === 'completed') return project.status === 'completed' || project.status === 'export_ready'
         return project.status === statusFilter
       })
-      .filter(project => project.type === 'draft' || !styleFilter || project.visualStyle === styleFilter)
-      .filter(project => matchesDuration(project.durationSeconds, durationFilter))
-      .filter(project => !keyword || project.name.toLowerCase().includes(keyword) || project.provider.toLowerCase().includes(keyword))
+      .filter(project => project.type === 'task' || !styleFilter || project.visualStyle === styleFilter)
+      .filter(project => project.type === 'task' || matchesDuration(project.durationSeconds, durationFilter))
+      .filter(project => project.type === 'task' || !keyword || project.name.toLowerCase().includes(keyword) || project.provider.toLowerCase().includes(keyword))
       .sort((a, b) => {
+        if (a.type === "task" && b.type === "task") return 0
         if (sortMode === 'name') return a.name.localeCompare(b.name, 'zh-CN')
         if (sortMode === 'status') return a.status.localeCompare(b.status)
         return String(b.sortTime).localeCompare(String(a.sortTime))
       })
   }, [durationFilter, projects, search, sortMode, statusFilter, styleFilter])
 
-  const statusCount = key => {
-    if (key === 'all') return projects.filter(project => project.type === 'task' && DEFAULT_VISIBLE_STATUSES.has(project.status)).length
-    if (key === 'completed') return projects.filter(project => project.status === 'completed' || project.status === 'export_ready').length
-    return projects.filter(project => project.status === key).length
-  }
-  const styleCount = value => projects.filter(project => project.type === 'task' && DEFAULT_VISIBLE_STATUSES.has(project.status) && project.visualStyle === value).length
+  const statusCount = key => key === 'draft' ? projects.filter(project => project.type === 'draft').length : (catalog.counts?.[key] || 0)
+  const styleCount = () => undefined
 
   const resetFilters = () => {
+    setPage(1)
     setStatusFilter('all')
     setStyleFilter('')
     setDurationFilter('全部时长')
@@ -228,7 +233,8 @@ export function ProjectAssetsPage() {
     try {
       const result = await deleteTask(projectToDelete.id, { deleteFiles: true })
       clearSelectedProject(projectToDelete.id)
-      removeTaskFromView(projectToDelete.id)
+      if (result?.outcome === "deleting") await loadProjects()
+      else removeTaskFromView(projectToDelete.id)
       setProjectToDelete(null)
       const issueCount = getDeletionIssueCount(result)
       if (issueCount) toast.warning(`项目已删除，仍有 ${issueCount} 个本地路径未清理`)
@@ -251,28 +257,28 @@ export function ProjectAssetsPage() {
     <main className="assets-page">
       <aside className="assets-filters" aria-label="项目筛选">
         <div className="assets-filter-title"><h2>筛选条件</h2><button type="button" onClick={resetFilters}><RotateCcw size={14} aria-hidden="true" />重置</button></div>
-        <FilterGroup label="项目状态" items={STATUS_FILTERS.map(item => ({ ...item, count: statusCount(item.key) }))} value={statusFilter} onChange={setStatusFilter} />
-        <FilterGroup label="视频风格" items={[{ key: '', label: '全部风格', count: statusCount('all') }, ...visualStyles.map(style => ({ key: style.value, label: style.label, count: styleCount(style.value) }))]} value={styleFilter} onChange={setStyleFilter} />
-        <FilterGroup label="时长" items={DURATION_FILTERS.map(item => ({ key: item, label: item }))} value={durationFilter} onChange={setDurationFilter} />
+        <FilterGroup label="项目状态" items={STATUS_FILTERS.map(item => ({ ...item, count: statusCount(item.key) }))} value={statusFilter} onChange={changeFilter(setStatusFilter)} />
+        <FilterGroup label="视频风格" items={[{ key: '', label: '全部风格', count: statusCount('all') }, ...visualStyles.map(style => ({ key: style.value, label: style.label, count: styleCount(style.value) }))]} value={styleFilter} onChange={changeFilter(setStyleFilter)} />
+        <FilterGroup label="时长" items={DURATION_FILTERS.map(item => ({ key: item, label: item }))} value={durationFilter} onChange={changeFilter(setDurationFilter)} />
       </aside>
 
       <section className="assets-workspace">
         <header className="assets-toolbar">
-          <div><p className="eyebrow">项目资产</p><h1>{sectionTitle} <span>{filteredProjects.length}</span></h1></div>
+          <div><p className="eyebrow">项目资产</p><h1>{sectionTitle} <span>{statusFilter === "draft" ? filteredProjects.length : catalog.total}</span></h1></div>
           <div className="assets-toolbar-actions">
-            <label className="assets-search"><Search size={16} aria-hidden="true" /><span className="sr-only">搜索项目</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索名称或音色" /></label>
-            <select aria-label="项目排序" value={sortMode} onChange={event => setSortMode(event.target.value)}><option value="updated">最近更新</option><option value="name">项目名称</option><option value="status">项目状态</option></select>
+            <label className="assets-search"><Search size={16} aria-hidden="true" /><span className="sr-only">搜索项目</span><input value={search} onChange={event => changeFilter(setSearch)(event.target.value)} placeholder="搜索名称或音色" /></label>
+            <select aria-label="项目排序" value={sortMode} onChange={event => changeFilter(setSortMode)(event.target.value)}><option value="updated">最近更新</option><option value="name">项目名称</option><option value="status">项目状态</option></select>
             <button className="button button-primary" type="button" onClick={createProject}><Plus size={16} aria-hidden="true" />新建文稿</button>
           </div>
         </header>
 
-        {loading ? <LoadingState label="正在汇总本地草稿和项目..." /> : filteredProjects.length === 0 ? <EmptyState variant="projects" eyebrow={isProjectLibraryEmpty ? '项目档案' : '筛选结果'} title={isProjectLibraryEmpty ? '还没有项目' : '没有匹配的项目'} description={isProjectLibraryEmpty ? '从一份文稿开始，后续的分镜、素材和导出会按项目归档在这里。' : '当前筛选条件下没有结果，可以调整左侧筛选，或直接开始新文稿。'} action={<button className="button button-primary" type="button" onClick={createProject}><Plus size={16} aria-hidden="true" />新建文稿</button>} /> : (
+        {loading ? <LoadingState label="正在汇总本地草稿和项目..." /> : loadError ? null : filteredProjects.length === 0 ? <EmptyState variant="projects" eyebrow={isProjectLibraryEmpty ? '项目档案' : '筛选结果'} title={isProjectLibraryEmpty ? '还没有项目' : '没有匹配的项目'} description={isProjectLibraryEmpty ? '从一份文稿开始，后续的分镜、素材和导出会按项目归档在这里。' : '当前筛选条件下没有结果，可以调整左侧筛选，或直接开始新文稿。'} action={<button className="button button-primary" type="button" onClick={createProject}><Plus size={16} aria-hidden="true" />新建文稿</button>} /> : (
           <div className="asset-project-grid">
             {filteredProjects.map(project => {
               const usableCover = Boolean(project.cover && !brokenCovers[project.id])
               return (
                 <article className="asset-project-card" key={project.id}>
-                  <button className="asset-project-open" type="button" onClick={() => openProject(project)} aria-label={`打开 ${project.name}`}>
+                  <button className="asset-project-open" type="button" disabled={project.status === "deleting"} onClick={() => openProject(project)} aria-label={`打开 ${project.name}`}>
                     <div className={`asset-project-thumb${usableCover ? '' : ' is-empty'}`}>
                       {usableCover ? <img src={project.cover} alt="" onError={() => setBrokenCovers(current => ({ ...current, [project.id]: true }))} /> : <div><ImageOff size={22} aria-hidden="true" /><strong>{project.name.slice(0, 2)}</strong><small>{project.type === 'draft' ? '文稿草稿' : '暂无画面'}</small></div>}
                       <span>{project.duration}</span>
@@ -284,7 +290,7 @@ export function ProjectAssetsPage() {
                     </div>
                   </button>
                   <div className="asset-project-actions">
-                    <button className="asset-project-menu icon-button" type="button" title="项目操作" aria-label={`${project.name} 的项目操作`} aria-expanded={openMenuId === project.id} onClick={() => setOpenMenuId(current => current === project.id ? null : project.id)}><MoreHorizontal size={18} aria-hidden="true" /></button>
+                    <button className="asset-project-menu icon-button" type="button" disabled={project.status === "deleting"} title="项目操作" aria-label={`${project.name} 的项目操作`} aria-expanded={openMenuId === project.id} onClick={() => setOpenMenuId(current => current === project.id ? null : project.id)}><MoreHorizontal size={18} aria-hidden="true" /></button>
                     {openMenuId === project.id ? <div className="asset-project-popover" role="menu">{project.type === 'task' ? <button type="button" role="menuitem" onClick={() => navigate(`/assets/${project.id}`)}><FileText size={15} aria-hidden="true" />查看项目素材</button> : null}<button type="button" role="menuitem" onClick={() => selectDelete(project)}><Trash2 size={15} aria-hidden="true" />{project.type === 'draft' ? '删除草稿' : '删除项目'}</button></div> : null}
                   </div>
                 </article>
@@ -292,7 +298,9 @@ export function ProjectAssetsPage() {
             })}
           </div>
         )}
-        {!loading && filteredProjects.length > 0 && <footer className="assets-result-count"><FileText size={15} aria-hidden="true" />共 {filteredProjects.length} 项</footer>}
+        {loadError && <div role="alert">{loadError}<button onClick={loadProjects}>重试加载</button></div>}
+        {!loading && statusFilter !== 'draft' && !loadError && <nav aria-label="项目分页" className="assets-pagination"><button disabled={page === 1} onClick={() => setPage(value => value - 1)}>上一页</button><span>第 {page} / {Math.max(1, Math.ceil(catalog.total / 40))} 页，共 {catalog.total} 项</span><button disabled={page * 40 >= catalog.total} onClick={() => setPage(value => value + 1)}>下一页</button></nav>}
+        {!loading && statusFilter === 'draft' && filteredProjects.length > 0 && <footer className="assets-result-count"><FileText size={15} aria-hidden="true" />共 {filteredProjects.length} 项</footer>}
       </section>
 
       <ConfirmDialog open={Boolean(projectToDelete)} title={deleteConfirmation.title} message={deleteConfirmation.message} confirmLabel={deletingId ? '正在删除...' : deleteConfirmation.confirmLabel} confirmDisabled={Boolean(deletingId)} danger onConfirm={confirmDelete} onClose={() => { if (!deletingId) setProjectToDelete(null) }} />

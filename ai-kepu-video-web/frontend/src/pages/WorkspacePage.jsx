@@ -18,7 +18,9 @@ import { useLocation, useNavigate, useParams } from 'react-router'
 import {
   cancelExportJob,
   createExport,
-  generateTaskWorkspaceAssets,
+  confirmProduction,
+  resolveInputMode,
+  cancelProduction,
   getConfig,
   getExportJob,
   getExportState,
@@ -30,6 +32,7 @@ import {
   retryTaskAssets,
   finalizeTaskWorkspace,
   resegmentTaskWorkspace,
+  restoreTaskPlan,
   resumeTask,
   selectSegmentImage,
   updateSegment,
@@ -67,6 +70,8 @@ import {
 } from './workspacePreview'
 import { buildFailedRetryPayload, collectWorkspaceIssues, deriveWorkspaceJourney } from './workspaceGuidance'
 import { readWorkspaceView, writeWorkspaceView } from './workspaceViewState'
+import { WorkspaceSaveQueue } from './workspaceSaveQueue'
+import { readPendingEdits, writePendingEdits } from './workspacePendingStorage'
 import './workspace-page.css'
 
 const LAST_VOICE_KEY = 'insightcut:last-voice'
@@ -74,14 +79,6 @@ const LAST_TTS_OPTIONS_KEY = 'insightcut:last-tts-options'
 const LAST_RUNTIME_KEY = 'insightcut:last-generation-runtime'
 const ACTIVE_EXPORT_STATUSES = new Set(['pending', 'processing'])
 const WORKSPACE_TOUR_KEY = 'insightcut:workspace-tour:v1'
-
-function shouldShowWorkspaceTour() {
-  try {
-    return localStorage.getItem(WORKSPACE_TOUR_KEY) !== 'seen'
-  } catch {
-    return true
-  }
-}
 
 function activePreviewJob(exportState) {
   return (Array.isArray(exportState?.jobs) ? exportState.jobs : [])
@@ -115,22 +112,12 @@ function readLastTtsOptions() {
   }
 }
 
-function pendingKey(taskId) {
-  return `insightcut:workspace-pending:${taskId}`
-}
-
 function readPending(taskId) {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(pendingKey(taskId)) || '{}')
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
+  try { return readPendingEdits(taskId) } catch { return {} }
 }
 
 function writePending(taskId, value) {
-  if (Object.keys(value).length) localStorage.setItem(pendingKey(taskId), JSON.stringify(value))
-  else localStorage.removeItem(pendingKey(taskId))
+  writePendingEdits(taskId, value)
 }
 
 function stageMeta(workspace) {
@@ -247,7 +234,7 @@ export function WorkspacePage() {
   const [previewJob, setPreviewJob] = useState(null)
   const [busyAction, setBusyAction] = useState('')
   const [resegmentConfirmOpen, setResegmentConfirmOpen] = useState(false)
-  const [tourOpen, setTourOpen] = useState(shouldShowWorkspaceTour)
+  const [tourOpen, setTourOpen] = useState(false)
   const [historySegmentIndex, setHistorySegmentIndex] = useState(null)
   const [imageHistories, setImageHistories] = useState({})
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -257,10 +244,9 @@ export function WorkspacePage() {
   const uploadSegmentRef = useRef(null)
   const [savingCount, setSavingCount] = useState(0)
   const [saveMessage, setSaveMessage] = useState('已同步')
-  const saveTimersRef = useRef(new Map())
-  const saveQueueRef = useRef(Promise.resolve())
-  const saveGenerationRef = useRef(0)
-  const pendingRef = useRef(readPending(taskId))
+  const pendingRef = useRef({})
+  const editQueueRef = useRef(null)
+  const [editConflicts, setEditConflicts] = useState([])
   const initializedTaskRef = useRef(null)
   const activeTaskIdRef = useRef(taskId)
   const notifiedPreviewJobsRef = useRef(new Set())
@@ -273,11 +259,30 @@ export function WorkspacePage() {
 
   useEffect(() => {
     const rememberedView = readWorkspaceView(taskId)
-    saveGenerationRef.current += 1
-    saveTimersRef.current.forEach(timer => window.clearTimeout(timer))
-    saveTimersRef.current.clear()
-    saveQueueRef.current = Promise.resolve()
-    pendingRef.current = readPending(taskId)
+    editQueueRef.current?.stop()
+    const queue = new WorkspaceSaveQueue({
+      pending: readPending(taskId), auto: true,
+      send: (index, patch) => updateSegment(taskId, index, patch),
+      refresh: () => getTaskWorkspace(taskId),
+      onChange: (patches, serialized, message) => {
+        if (activeTaskIdRef.current !== taskId) return
+        pendingRef.current = patches
+        try { writePending(taskId, serialized) } catch { message = '本地暂存不可用，请保持页面打开直到保存完成' }
+        setSaveMessage(message)
+        setSavingCount(message === '正在保存…' ? 1 : 0)
+        setEditConflicts(queue.conflicts())
+      },
+      onSaved: result => {
+        if (activeTaskIdRef.current !== taskId) return
+        setWorkspace(current => {
+          const next = { ...current, plan_version: result.plan_version, snapshot_key: result.snapshot_key }
+          workspaceRef.current = next
+          return next
+        })
+      },
+    })
+    editQueueRef.current = queue
+    pendingRef.current = queue.patches()
     initializedTaskRef.current = null
     workspaceRef.current = null
     setWorkspace(null)
@@ -285,7 +290,7 @@ export function WorkspacePage() {
     setLoadError('')
     setMissingTask(false)
     setSavingCount(0)
-    setSaveMessage('已同步')
+    setSaveMessage(Object.keys(pendingRef.current).length ? '等待保存…' : '已同步')
     setSelectedIndex(rememberedView.selectedIndex)
     setSettingsOpen(rememberedView.settingsOpen)
     setMobilePane(rememberedView.mobilePane)
@@ -298,6 +303,7 @@ export function WorkspacePage() {
     setLightboxOpen(false)
     setLightboxIndex(0)
     uploadSegmentRef.current = null
+    return () => queue.stop()
   }, [taskId])
 
   const setWorkspaceSettingsOpen = useCallback(nextValue => {
@@ -365,6 +371,8 @@ export function WorkspacePage() {
   }, [])
 
   const applyWorkspaceData = useCallback(rawData => {
+    if (Number(rawData.plan_version) < Number(workspaceRef.current?.plan_version || 0)) return
+    editQueueRef.current?.rebase(rawData)
     const data = applyPendingEdits(rawData)
     setWorkspace(data)
     workspaceRef.current = data
@@ -376,11 +384,10 @@ export function WorkspacePage() {
       const rememberedVoice = localStorage.getItem(LAST_VOICE_KEY) || ''
       const hasConfirmedVoice = Boolean(data.voice_confirmed && data.voice_type)
       const initialVoice = data.voice_type || rememberedVoice
-      const initialOptions = hasConfirmedVoice ? data.tts_options || {} : readLastTtsOptions()
+      const initialOptions = data.tts_options || {}
       setSelectedVoice(initialVoice)
       setTtsOptions(mergeTtsOptions({}, initialOptions, String(initialVoice).startsWith('doubao:') ? 'doubao' : 'mimo'))
-      setWorkspaceSettingsOpen(hasConfirmedVoice ? rememberedView.settingsOpen : true)
-      if (!hasConfirmedVoice && window.matchMedia?.('(max-width: 780px)').matches) selectMobilePane('settings')
+      setWorkspaceSettingsOpen(rememberedView.settingsOpen)
     }
 
     selectProject({ taskId, name: data.name })
@@ -437,6 +444,17 @@ export function WorkspacePage() {
     return () => { active = false }
   }, [taskId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    const jobId = workspace?.production?.job_id
+    if (!jobId) return
+    let active = true
+    getExportJob(taskId, jobId).then(job => { if (active) setPreviewJob(job) }).catch(() => {})
+    if (workspace.production.state === 'completed') {
+      getExportState(taskId).then(state => { if (active) { setExportState(state); setPreviewMode('full') } }).catch(() => {})
+    }
+    return () => { active = false }
+  }, [taskId, workspace?.production?.job_id, workspace?.production?.state])
+
   const previewJobIsActive = Boolean(
     previewJob
     && (!previewJob.task_id || previewJob.task_id === taskId)
@@ -478,7 +496,6 @@ export function WorkspacePage() {
   })
 
   useEffect(() => () => {
-    saveTimersRef.current.forEach(timer => window.clearTimeout(timer))
     playbackAudioRef.current?.pause()
     voiceAudioRef.current?.pause()
     fullVideoRef.current?.pause()
@@ -668,62 +685,38 @@ export function WorkspacePage() {
     setPreviewMode(nextMode)
   }
 
-  const updateLocalSegment = (segmentIndex, patch) => {
+  const enqueueSave = (segmentIndex, patch) => {
     setWorkspace(current => {
-      const next = {
-        ...current,
-        segments: current.segments.map(segment => segment.segment_index === segmentIndex ? { ...segment, ...patch } : segment),
-      }
+      const next = { ...current, segments: current.segments.map(segment => segment.segment_index === segmentIndex ? { ...segment, ...patch } : segment) }
       workspaceRef.current = next
       return next
     })
-    pendingRef.current = {
-      ...pendingRef.current,
-      [segmentIndex]: { ...(pendingRef.current[segmentIndex] || {}), ...patch },
-    }
-    writePending(taskId, pendingRef.current)
+    editQueueRef.current.edit(segmentIndex, patch)
   }
 
-  const enqueueSave = (segmentIndex, patch) => {
-    updateLocalSegment(segmentIndex, patch)
-    const saveGeneration = saveGenerationRef.current
-    const saveTaskId = taskId
-    const timerKey = `${segmentIndex}:${Object.keys(patch).sort().join(',')}`
-    window.clearTimeout(saveTimersRef.current.get(timerKey))
-    setSaveMessage('等待保存…')
-    saveTimersRef.current.set(timerKey, window.setTimeout(() => {
-      setSavingCount(count => count + 1)
-      setSaveMessage('正在保存…')
-      saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(async () => {
-        if (saveGenerationRef.current !== saveGeneration || activeTaskIdRef.current !== saveTaskId) return
-        const live = workspaceRef.current
-        try {
-          const result = await updateSegment(saveTaskId, segmentIndex, {
-            ...patch,
-            expected_plan_version: live?.plan_version,
-          })
-          if (saveGenerationRef.current !== saveGeneration || activeTaskIdRef.current !== saveTaskId) return
-          pendingRef.current = { ...pendingRef.current }
-          delete pendingRef.current[segmentIndex]
-          writePending(saveTaskId, pendingRef.current)
-          setWorkspace(current => {
-            const next = { ...current, plan_version: result.plan_version, snapshot_key: result.snapshot_key }
-            workspaceRef.current = next
-            return next
-          })
-          setSaveMessage('已同步')
-        } catch (error) {
-          if (saveGenerationRef.current !== saveGeneration || activeTaskIdRef.current !== saveTaskId) return
-          setSaveMessage('保存失败')
-          toast.error(errorToastMessage(error))
-          if (error?.response?.status === 409) workspacePolling.refresh()
-        } finally {
-          if (saveGenerationRef.current === saveGeneration && activeTaskIdRef.current === saveTaskId) {
-            setSavingCount(count => Math.max(0, count - 1))
-          }
-        }
-      })
-    }, 320))
+  const flushEdits = async () => {
+    try {
+      await editQueueRef.current?.flush()
+      if (activeTaskIdRef.current !== taskId) return false
+      const fresh = await getTaskWorkspace(taskId)
+      if (activeTaskIdRef.current !== taskId) return false
+      applyWorkspaceData(fresh)
+      return !Object.keys(pendingRef.current).length
+    } catch (error) {
+      toast.error(error?.message || '保存失败，已保留编辑，请重试')
+      return false
+    }
+  }
+  const enterExport = async () => { if (await flushEdits()) navigate(`/export/${taskId}`) }
+  const restorePlan = async () => {
+    if (!await flushEdits()) return
+    setBusyAction('restore')
+    try {
+      await restoreTaskPlan(taskId, { expected_plan_version: workspaceRef.current.plan_version })
+      applyWorkspaceData(await getTaskWorkspace(taskId))
+      toast.success('已恢复拆分前的文稿和素材引用')
+    } catch (error) { toast.error(errorToastMessage(error)) }
+    finally { setBusyAction('') }
   }
 
   const stopVoicePreview = useCallback(() => {
@@ -823,11 +816,17 @@ export function WorkspacePage() {
   }
 
   const startAssets = async () => {
-    if (savingCount || Object.keys(pendingRef.current).length) return toast.info('请等待当前编辑保存完成')
+    if (!await flushEdits()) return
     setBusyAction('generate')
     try {
-      await generateTaskWorkspaceAssets(taskId, { snapshot_key: workspace.snapshot_key })
-      toast.success('已开始生成图片与配音')
+      const current = workspaceRef.current
+      const stable = v => JSON.stringify(v || {}, Object.keys(v || {}).sort())
+      if (selectedVoice !== current.voice_type || stable(ttsOptions) !== stable(current.tts_options)) {
+        if (!await saveWorkspaceSettings({ voice_type: selectedVoice, tts_options: ttsOptions, voice_confirmed: true })) return
+      }
+      const latest = await getTaskWorkspace(taskId)
+      await confirmProduction(taskId, { snapshot_key: latest.snapshot_key, plan_version: latest.plan_version })
+      toast.success('已确认生产，图片、配音和视频将在后台连续生成')
       workspacePolling.refresh()
     } catch (error) {
       toast.error(errorToastMessage(error))
@@ -838,13 +837,11 @@ export function WorkspacePage() {
   }
 
   const regenerateOne = async (segment, target) => {
-    if (savingCount || Object.keys(pendingRef.current).length) {
-      return toast.info('请等待当前分镜设置保存完成')
-    }
+    if (!await flushEdits()) return
     setBusyAction(`${target}:${segment.segment_index}`)
     try {
       await retryTaskAssets(taskId, {
-        snapshot_key: workspace.snapshot_key,
+        snapshot_key: workspaceRef.current.snapshot_key,
         scope: 'selected',
         targets: [{ segment_index: segment.segment_index, asset_type: target }],
       })
@@ -858,6 +855,7 @@ export function WorkspacePage() {
   }
 
   const regeneratePrompt = async segment => {
+    if (!await flushEdits()) return
     const actionKey = `prompt:${segment.segment_index}`
     setBusyAction(actionKey)
     try {
@@ -981,12 +979,13 @@ export function WorkspacePage() {
   const resegment = () => setResegmentConfirmOpen(true)
 
   const confirmResegment = async () => {
+    if (!await flushEdits()) return
     if (busyAction === 'resegment') return
     setBusyAction('resegment')
     try {
       await resegmentTaskWorkspace(taskId, {
-        script_text: workspace.script_text,
-        expected_plan_version: workspace.plan_version,
+        script_text: workspaceRef.current.script_text,
+        expected_plan_version: workspaceRef.current.plan_version,
       })
       setResegmentConfirmOpen(false)
       toast.success('已开始重新拆分分镜')
@@ -1004,6 +1003,7 @@ export function WorkspacePage() {
   }
 
   const createFullVideoPreview = async () => {
+    if (!await flushEdits()) return
     if (previewJobIsActive) {
       setPreviewMode('full')
       if (previewJobPolling.error) previewJobPolling.reconnect()
@@ -1047,25 +1047,28 @@ export function WorkspacePage() {
   }
 
   const resumeGeneration = async () => {
+    if (workspace.production || recoveryActionForWorkspace(workspace) === 'finalize') return startAssets()
+    if (workspace.input_mode_required) return toast.warning('请先选择这份原始输入是主题还是完整文稿')
+    if (!await flushEdits()) return
     setBusyAction('resume')
     try {
       const recoveryAction = recoveryActionForWorkspace(workspace)
       if (recoveryAction === 'retry_assets') {
         await retryTaskAssets(taskId, {
-          snapshot_key: workspace.snapshot_key,
+          snapshot_key: workspaceRef.current.snapshot_key,
           scope: 'failed',
         })
         toast.success(`已开始修复 ${workspace.recovery?.targets?.length || 0} 个失败素材`)
       } else if (recoveryAction === 'update_stale_assets') {
         const targets = workspace.recovery?.targets || []
         await retryTaskAssets(taskId, {
-          snapshot_key: workspace.snapshot_key,
+          snapshot_key: workspaceRef.current.snapshot_key,
           scope: 'selected',
           targets,
         })
         toast.success(`已开始更新 ${targets.length} 个受影响素材`)
       } else if (recoveryAction === 'finalize') {
-        await finalizeTaskWorkspace(taskId, { snapshot_key: workspace.snapshot_key })
+        await finalizeTaskWorkspace(taskId, { snapshot_key: workspaceRef.current.snapshot_key })
         toast.success('已开始使用现有素材完成生产')
       } else {
         await resumeTask(taskId)
@@ -1081,6 +1084,7 @@ export function WorkspacePage() {
   }
 
   const retryAllFailed = async () => {
+    if (!await flushEdits()) return
     const assetFailureCount = workspaceIssues.counts.image + workspaceIssues.counts.audio
     if (!assetFailureCount) return toast.info('提示词失败需逐段精确重新生成')
     setBusyAction('retry-failed')
@@ -1146,10 +1150,11 @@ export function WorkspacePage() {
       if (target >= 0) selectSegment(target)
       return
     }
-    if (index === 5) navigate(`/export/${taskId}`)
+    if (index === 5) void enterExport()
   }
 
   return <main className={`production-workspace${settingsOpen ? ' is-settings-open' : ''}`} data-mobile-pane={mobilePane}>
+    {workspace.input_mode_required && <section className="batch-alert" role="alert"><p>这个历史任务没有记录输入模式。原始输入：{workspace.original_input}。请选择后再继续。</p>{[['theme','这是主题'],['script','这是完整文稿']].map(([mode,label])=><button key={mode} onClick={async()=>{try{await resolveInputMode(taskId,mode);await resumeTask(taskId);workspacePolling.refresh()}catch(e){toast.error(errorToastMessage(e))}}}>{label}</button>)}</section>}
     <WorkspaceStageNavigator journey={journey} onHelp={() => setTourOpen(true)} onNavigate={navigateJourneyStep} />
     <div className="workspace-polling-notices">
       {workspacePolling.error ? <PollingFailureNotice
@@ -1269,6 +1274,8 @@ export function WorkspacePage() {
         stage={stage}
         activeStyle={activeStyle}
         saveMessage={saveMessage}
+        onRetrySave={flushEdits}
+        onRestore={restorePlan}
         editable={editable}
         busyAction={busyAction}
         segments={segments}
@@ -1339,7 +1346,7 @@ export function WorkspacePage() {
       workspace={workspace}
       stage={stage}
       voiceReady={voiceReady}
-      voiceLabel={voiceName(voices, workspace.voice_type)}
+      voiceLabel={voiceName(voices, selectedVoice || workspace.voice_type)}
       visualPlanReady={visualPlanReady}
       savingCount={savingCount}
       busyAction={busyAction}
@@ -1357,9 +1364,10 @@ export function WorkspacePage() {
       onResume={resumeGeneration}
       onConfirmVoice={confirmVoice}
       onGenerateAssets={startAssets}
+      onCancelProduction={async () => { try { await cancelProduction(taskId); workspacePolling.refresh() } catch (error) { toast.error(errorToastMessage(error)) } }}
       onFullVideo={createFullVideoPreview}
       onCancelFullVideo={cancelFullVideoPreview}
-      onExport={() => navigate(`/export/${taskId}`)}
+      onExport={enterExport}
     />
 
       <input ref={uploadInputRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={handleImageUpload} />
@@ -1379,13 +1387,22 @@ export function WorkspacePage() {
         </> : null}
       />
 
+      {editConflicts.length > 0 && <section className="workspace-conflicts" aria-label="编辑冲突" role="alert">
+        <h2>编辑冲突：两份内容均已保留</h2>
+        {editConflicts.map(conflict => <section key={`${conflict.index}:${conflict.field}`}>
+          <h3>分镜 {Number(conflict.index) + 1} · {conflict.field === 'text' ? '文稿' : '分镜设置'}</h3>
+          <p>本页内容：{String(conflict.value ?? '')}</p><p>已保存内容：{String(conflict.server ?? '该分镜已被重新拆分')}</p>
+          <button disabled={!editQueueRef.current?.server[conflict.index]} onClick={() => editQueueRef.current.resolve(conflict.index, conflict.field, true)}>保留本页内容</button>
+          <button onClick={() => { editQueueRef.current.resolve(conflict.index, conflict.field, false); workspacePolling.refresh() }}>使用已保存内容</button>
+        </section>)}
+      </section>}
       <WorkspaceSettingsOverlay open={isSettingsOverlay} onClose={() => navigate(`/workspace/${taskId}`)}>
         <SettingsPage embedded onClose={() => navigate(`/workspace/${taskId}`)} />
       </WorkspaceSettingsOverlay>
       <ConfirmDialog
         open={resegmentConfirmOpen}
         title="重新拆分全部分镜"
-        message="重新拆分会重建分镜结构和自动提示词。当前手工编辑不会被静默映射到新分镜；已生成素材仍会保留在项目资产中，供你查看和回选。"
+        message="将先保存当前编辑，再用最新文稿重新拆分。拆分前版本可以恢复，已生成素材仍保留在项目资产中。"
         confirmLabel={busyAction === 'resegment' ? '正在重新拆分…' : '确认重新拆分'}
         confirmDisabled={busyAction === 'resegment'}
         danger
@@ -1400,8 +1417,8 @@ export function WorkspacePage() {
       >
         <ol className="workspace-tour-steps">
           <li><b>1</b><span><strong>看预案</strong><small>左侧按顺序列出分镜，中间展示完整文案、画面和素材状态。</small></span></li>
-          <li><b>2</b><span><strong>先确认音色和画面</strong><small>右侧设置保存后，底部主按钮才会开始生成图片与配音。</small></span></li>
-          <li><b>3</b><span><strong>逐段检查，再按需导出</strong><small>中间可以连续即时预览；完整视频只在你主动点击后生成。</small></span></li>
+          <li><b>2</b><span><strong>确认并自动生成视频</strong><small>采用当前音色和设置，确认一次后在后台连续生成图片、配音和 MP4。</small></span></li>
+          <li><b>3</b><span><strong>查看成片，按需导出</strong><small>预览和试听可选。成片可以播放下载，剪映草稿只在请求导出时构建。</small></span></li>
         </ol>
       </Modal>
     </main>

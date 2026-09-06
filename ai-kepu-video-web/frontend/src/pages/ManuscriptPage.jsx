@@ -1,3 +1,5 @@
+import { BatchComposer } from './BatchComposer'
+export { parseTopics } from './batchDraft'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, ClipboardPaste, FileStack, FileUp, Sparkles } from 'lucide-react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
@@ -67,7 +69,7 @@ export function ManuscriptPage() {
 
   useEffect(() => {
     if (!draftId) {
-      navigate(`/manuscript/${draftRef.current.draft_id}${creationMode === 'batch' ? '?mode=batch' : ''}`, { replace: true })
+      navigate(`/manuscript/${draftRef.current.draft_id}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`, { replace: true })
       return
     }
     const loaded = getDraft(draftId)
@@ -115,6 +117,7 @@ export function ManuscriptPage() {
   }
 
   useEffect(() => {
+    if (creationMode === 'batch') return
     const templateId = searchParams.get('template')
     if (templateId && draftRef.current.template_id === templateId) return
     if (!templateId && draftRef.current.template_id) return
@@ -127,6 +130,7 @@ export function ManuscriptPage() {
       if (!template) return
       patchDraft({
         template_id: template.template_id,
+        length: template.length ?? 300,
         text_style: template.text_style,
         visual_style: template.visual_style,
         ratio: template.ratio,
@@ -135,7 +139,7 @@ export function ManuscriptPage() {
         subtitle_options: template.subtitle_options,
         generation_options: template.generation_options,
       })
-      if (templateId) toast.success(`已应用生产模板“${template.name}”`)
+      if (templateId) toast.success(`已应用预案模板“${template.name}”`)
     })
     return () => { alive = false }
   }, [searchParams])
@@ -201,7 +205,7 @@ export function ManuscriptPage() {
     persistDraft(prepared, setDraft, setSaveState, setSavedAt)
     setStarting(true)
     try {
-      const readiness = await getConfigReadiness({ voiceType })
+      const readiness = await getConfigReadiness({ voiceType: prepared.template_voice_type || voiceType, phase: 'planning' })
       if (readiness?.status === 'not_ready' || readiness?.status === 'unknown') {
         setReadinessPrompt({ ...readiness, pendingLaunch })
         return
@@ -273,7 +277,7 @@ export function ManuscriptPage() {
         <section className="writing-canvas" aria-label="文稿编辑画布">
           <header className="canvas-heading"><div><p>{isTheme ? '主题模式' : '脚本画布'}</p><h1>{isTheme ? '主题输入' : '文稿编辑'}</h1></div><span className={`save-indicator ${saveState}`}><CheckCircle2 size={16} />{saveState === 'saved' ? `已保存 ${savedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : '保存中...'}</span></header>
           <div className={`paper-editor-shell ${isEmpty ? 'is-empty' : ''}`}>
-            <textarea ref={editorRef} value={text || ''} maxLength={isTheme ? 100 : 5000} placeholder={paperFocused ? (isTheme ? '输入 100 字以内的视频主题，例如：为什么普通人越来越需要 AI 助手' : '直接输入或粘贴完整文稿') : ''} onFocus={() => setPaperFocused(true)} onBlur={() => setPaperFocused(false)} onChange={event => patchDraft(isTheme ? { theme: event.target.value.slice(0, 100) } : { manuscript: event.target.value.slice(0, 5000) })} />
+            <textarea aria-label={isTheme ? '视频主题' : '视频文稿'} ref={editorRef} value={text || ''} maxLength={isTheme ? 100 : 5000} placeholder={paperFocused ? (isTheme ? '输入 100 字以内的视频主题，例如：为什么普通人越来越需要 AI 助手' : '直接输入或粘贴完整文稿') : ''} onFocus={() => setPaperFocused(true)} onBlur={() => setPaperFocused(false)} onChange={event => patchDraft(isTheme ? { theme: event.target.value.slice(0, 100) } : { manuscript: event.target.value.slice(0, 5000) })} />
             {isEmpty ? <button type="button" className="empty-prompt" aria-label={isTheme ? '开始输入视频主题' : '开始输入视频文稿'} onClick={() => { setPaperFocused(true); editorRef.current?.focus() }}>
               <span className="empty-prompt-placeholder">{isTheme ? '输入 100 字以内主题...' : '在这里输入或粘贴完整文稿...'}</span>
               <EmptyStateCard
@@ -396,109 +400,4 @@ function CreationModeSwitch({ value, onChange }) {
     <button type="button" aria-current={value === 'single' ? 'page' : undefined} className={value === 'single' ? 'is-active' : ''} onClick={() => onChange('single')}>单项目</button>
     <button type="button" aria-current={value === 'batch' ? 'page' : undefined} className={value === 'batch' ? 'is-active' : ''} onClick={() => onChange('batch')}>批量预案</button>
   </nav>
-}
-
-function cleanBatchTheme(value) {
-  const widthNormalized = Array.from(String(value || ''), character => {
-    const codepoint = character.codePointAt(0)
-    if (codepoint === 0x3000) return ' '
-    if (codepoint >= 0xFF01 && codepoint <= 0xFF5E) return String.fromCodePoint(codepoint - 0xFEE0)
-    return character
-  }).join('')
-  return widthNormalized.replace(/[\u0009-\u000d\u0020]+/g, ' ').replace(/^ | $/g, '')
-}
-
-function normalizeBatchTheme(value) {
-  return cleanBatchTheme(value).replace(/[A-Z]/g, character => character.toLowerCase())
-}
-
-export function parseTopics(value) {
-  const topics = String(value || '').split(/\r\n|\n|\r/).map(cleanBatchTheme).filter(Boolean)
-  const seen = new Map()
-  const duplicates = []
-  topics.forEach(topic => {
-    const key = normalizeBatchTheme(topic)
-    if (seen.has(key) && !duplicates.includes(topic)) duplicates.push(topic)
-    else seen.set(key, topic)
-  })
-  return { topics, duplicates }
-}
-
-function BatchComposer({ draft, onModeChange }) {
-  const navigate = useNavigate()
-  const [topicText, setTopicText] = useState('')
-  const [concurrency, setConcurrency] = useState(1)
-  const [submitting, setSubmitting] = useState(false)
-  const { topics, duplicates } = useMemo(() => parseTopics(topicText), [topicText])
-  const countValid = topics.length >= 2 && topics.length <= 50
-  const canSubmit = countValid && duplicates.length === 0 && !submitting
-
-  const submit = async () => {
-    if (!countValid) return toast.warning('请输入 2–50 个非空主题，每行一个')
-    if (duplicates.length) return toast.warning('请先移除规范化后重复的主题')
-    setSubmitting(true)
-    try {
-      const voiceType = draft.template_voice_type || localStorage.getItem('insightcut:last-voice') || undefined
-      const result = await createBatch({
-        items: topics.map(theme => ({ theme })),
-        concurrency,
-        style: `${draft.text_style || '知识科普'}|${draft.visual_style || '吉卜力'}`,
-        ratio: draft.ratio || '16:9',
-        length: normalizeLength(draft.length) || 300,
-        voice_type: voiceType,
-        tts_options: draft.template_tts_options || readLastTtsOptions(),
-        template_id: draft.template_id || undefined,
-        generation_options: draft.generation_options || undefined,
-        subtitle_options: draft.subtitle_options || undefined,
-      })
-      toast.success(`已创建 ${result.total_count} 个预案项目`)
-      navigate(`/batches/${result.batch_id}`)
-    } catch (error) {
-      toast.error(error?.response?.data?.detail || '批次创建失败')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return <main className="creation-page batch-composer-page">
-    <CreationModeSwitch value="batch" onChange={onModeChange} />
-    <section className="manuscript-layout batch-composer-layout">
-      <section className="writing-canvas batch-topic-sheet" aria-label="批量主题编辑画布">
-        <header className="canvas-heading">
-          <div><p>主题清单</p><h1>批量预案</h1></div>
-          <span className={`batch-count-indicator${countValid && !duplicates.length ? ' is-ready' : ''}`}><CheckCircle2 size={16} />{topics.length} / 50 个主题</span>
-        </header>
-        <div className="paper-editor-shell batch-topic-editor">
-          <textarea value={topicText} onChange={event => setTopicText(event.target.value)} placeholder={'每行输入一个主题，例如：\n为什么海水是咸的\n人为什么会做梦\n极光是怎样形成的'} aria-label="批量主题，每行一个" />
-          <footer><span>空行会自动忽略；全角/半角和多余空格归一后不能重复。</span>{duplicates.length ? <strong role="alert">重复：{duplicates.slice(0, 3).join('、')}</strong> : null}</footer>
-        </div>
-      </section>
-
-      <aside className="work-panel manuscript-settings batch-composer-settings" aria-label="批量预案设置">
-        <PanelHeading eyebrow="创作配置" title="批量设置" />
-
-        <section className="manuscript-settings-section" aria-labelledby="batch-scope-heading">
-          <header className="manuscript-settings-heading"><span>01</span><h3 id="batch-scope-heading">批次范围</h3></header>
-          <section className="batch-flow-note"><FileStack size={18} /><div><strong>生成后逐个确认</strong><p>每个项目会完成文稿、分镜和图片提示词，然后暂停等待确认，不会自动生图或配音。</p></div></section>
-          <fieldset className="control-group"><legend>批次并发</legend><div className="segmented-control">{[1, 2, 3].map(value => <button type="button" key={value} className={concurrency === value ? 'is-selected' : ''} onClick={() => setConcurrency(value)}>{value}</button>)}</div><small>全系统最多同时运行 3 个批量项目。</small></fieldset>
-        </section>
-
-        <section className="manuscript-settings-section" aria-labelledby="batch-preset-heading">
-          <header className="manuscript-settings-heading"><span>02</span><h3 id="batch-preset-heading">共享预设</h3></header>
-          <dl className="batch-shared-summary">
-            <div><dt>风格</dt><dd>{draft.text_style || '知识科普'} · {draft.visual_style || '吉卜力'}</dd></div>
-            <div><dt>画幅</dt><dd>{draft.ratio || '16:9'}</dd></div>
-            <div><dt>文稿</dt><dd>{normalizeLength(draft.length) || 300} 字</dd></div>
-            <div><dt>音色</dt><dd>{draft.template_voice_type || localStorage.getItem('insightcut:last-voice') || '系统默认'}</dd></div>
-            <div><dt>模板</dt><dd>{draft.template_id ? '已应用' : '默认预设'}</dd></div>
-          </dl>
-        </section>
-
-        <footer className="settings-action-bar batch-action-bar">
-          <button type="button" className="button button-primary batch-submit" disabled={!canSubmit} onClick={submit}>{submitting ? '正在创建批次…' : `创建 ${topics.length || 0} 个预案`}</button>
-          <button type="button" className="batch-history-link" onClick={() => navigate('/batches')}>查看已有批次</button>
-        </footer>
-      </aside>
-    </section>
-  </main>
 }

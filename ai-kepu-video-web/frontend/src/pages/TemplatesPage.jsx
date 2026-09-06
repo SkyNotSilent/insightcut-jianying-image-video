@@ -1,3 +1,4 @@
+import { PlanPresetFields, templatePreset, defaultPreset } from '../components/PlanPresetFields'
 import { Check, Copy, Pencil, Plus, Star, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
@@ -12,7 +13,7 @@ import { ConfirmDialog, Modal } from '../components/Modal'
 import { toast } from '../lib/toast'
 
 const NEW_TEMPLATE = {
-  name: '我的生产预设',
+  name: '我的预案模板',
   text_style: '知识科普',
   visual_style: '电影质感',
   ratio: '16:9',
@@ -41,11 +42,11 @@ export function TemplatesPage() {
   useEffect(() => { load() }, [])
 
   const openCreate = source => {
-    setEditor({ mode: 'create', source, name: source ? `${source.name} 副本` : NEW_TEMPLATE.name })
+    setEditor({ mode: 'create', source, name: source ? `${source.name} 副本` : NEW_TEMPLATE.name, preset: source ? templatePreset(source) : structuredClone(defaultPreset) })
   }
 
   const openRename = template => {
-    setEditor({ mode: 'rename', source: template, name: template.name })
+    setEditor({ mode: 'rename', source: template, name: template.name, preset: templatePreset(template) })
   }
 
   const saveEditor = async () => {
@@ -54,11 +55,11 @@ export function TemplatesPage() {
     setSaving(true)
     try {
       if (editor.mode === 'rename') {
-        await updateProductionTemplate(editor.source.template_id, { name })
+        await updateProductionTemplate(editor.source.template_id, { ...editor.preset, name })
         toast.success('模板名称已更新')
       } else {
-        await createProductionTemplate({ ...(editor.source || NEW_TEMPLATE), name, is_default: false })
-        toast.success('生产模板已保存')
+        await createProductionTemplate({ ...editor.preset, name, is_default: false })
+        toast.success('预案模板已保存')
       }
       setEditor(null)
       await load()
@@ -82,13 +83,13 @@ export function TemplatesPage() {
 
   const setDefault = async template => {
     await updateProductionTemplate(template.template_id, { is_default: true })
-    toast.success('已设为默认生产模板')
+    toast.success('已设为默认预案模板')
     load()
   }
 
   return <main className="catalog-page template-page">
     <header className="catalog-heading">
-      <div><p className="eyebrow">PRODUCTION PRESETS</p><h1>生产模板</h1><p>保存真正会影响后续生产的画面、配音、字幕与重试策略。</p></div>
+      <div><p className="eyebrow">PRODUCTION PRESETS</p><h1>预案模板</h1><p>保存真正会影响后续生产的画面、配音、字幕与重试策略。</p></div>
       <button type="button" className="button button-primary" onClick={() => openCreate()}><Plus size={17} /> 新建模板</button>
     </header>
     {loading ? <div className="catalog-loading">正在读取本地模板…</div> : templates.length ? <section className="template-grid">
@@ -101,17 +102,17 @@ export function TemplatesPage() {
           <div><dt>生成</dt><dd>生图 {template.generation_options?.image_concurrency || 8} 路 · 重试 {template.generation_options?.retry_count ?? 2} 次</dd></div>
         </dl>
         <footer>
-          <button type="button" onClick={() => navigate(`/manuscript?template=${template.template_id}`)}><Check size={15} /> 用于新文稿</button>
-          <button type="button" onClick={() => openRename(template)}><Pencil size={15} /> 重命名</button>
+          <button type="button" onClick={() => navigate(`/manuscript?template=${template.template_id}`)}><Check size={15} /> 用于单项目</button><button type="button" onClick={() => navigate(`/manuscript?mode=batch&template=${template.template_id}`)}>用于批量预案</button>
+          <button type="button" onClick={() => openRename(template)}><Pencil size={15} /> 编辑参数</button>
           <button type="button" onClick={() => openCreate(template)}><Copy size={15} /> 复制</button>
           {!template.is_default ? <button type="button" onClick={() => setDefault(template)}><Star size={15} /> 设为默认</button> : null}
           <button type="button" className="danger-link" onClick={() => setPendingDelete(template)}><Trash2 size={15} /> 删除</button>
         </footer>
       </article>)}
-    </section> : <section className="catalog-empty"><h2>还没有生产模板</h2><p>先保存一个常用配置，下一次创建项目时就不需要重新逐项设置。</p><button type="button" className="button button-primary" onClick={() => openCreate()}><Plus size={17} /> 创建第一个模板</button></section>}
+    </section> : <section className="catalog-empty"><h2>还没有预案模板</h2><p>先保存一个常用配置，下一次创建项目时就不需要重新逐项设置。</p><button type="button" className="button button-primary" onClick={() => openCreate()}><Plus size={17} /> 创建第一个模板</button></section>}
     <Modal
       open={Boolean(editor)}
-      title={editor?.mode === 'rename' ? '重命名生产模板' : editor?.source ? '复制生产模板' : '新建生产模板'}
+      title={editor?.mode === 'rename' ? '编辑预案模板' : editor?.source ? '复制预案模板' : '新建预案模板'}
       onClose={() => !saving && setEditor(null)}
       footer={<><button type="button" className="button button-secondary" onClick={() => setEditor(null)} disabled={saving}>取消</button><button type="button" className="button button-primary" onClick={saveEditor} disabled={saving || !editor?.name?.trim()}>{saving ? '正在保存…' : '保存模板'}</button></>}
     >
@@ -119,10 +120,11 @@ export function TemplatesPage() {
         <span>模板名称</span>
         <input data-modal-initial-focus value={editor?.name || ''} maxLength="60" onChange={event => setEditor(current => ({ ...current, name: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter') saveEditor() }} />
       </label>
+      {editor&&<PlanPresetFields value={editor.preset} onChange={preset=>setEditor(e=>({...e,preset}))}/>}
     </Modal>
     <ConfirmDialog
       open={Boolean(pendingDelete)}
-      title="删除生产模板"
+      title="删除预案模板"
       message={pendingDelete ? `删除“${pendingDelete.name}”？已经创建的项目不会被修改。` : ''}
       confirmLabel="删除模板"
       danger

@@ -207,3 +207,41 @@ test('cancels the retained full-video job without creating a second render', asy
   expect(activeExportJob.cancel_requested).toBe(true)
   expect(createdExportRequests).toBe(0)
 })
+
+test('restores failed edits after refresh and resubmits them without claiming sync', async ({ page }) => {
+  let offline = true
+  const stored = structuredClone(workspace)
+  await page.route('**/tasks/ui-assets/workspace', route => route.fulfill({ json: stored }))
+  await page.route('**/tasks/ui-assets/segments/0', async route => {
+    if (offline) return route.abort('failed')
+    const patch = route.request().postDataJSON()
+    stored.segments[0].text = patch.text
+    stored.plan_version += 1
+    return route.fulfill({ json: { plan_version: stored.plan_version, snapshot_key: 'saved-current-version' } })
+  })
+  await page.goto('/workspace/ui-assets')
+  const input = page.getByRole('textbox', { name: '配音文案' })
+  await input.fill('断网期间保留的最新文案')
+  await expect(page.getByText('保存失败，内容已保留', { exact: true })).toBeVisible()
+  await page.reload()
+  await expect(input).toHaveValue('断网期间保留的最新文案')
+  await expect(page.getByText('已同步', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('保存失败，内容已保留', { exact: true })).toBeVisible()
+  offline = false
+  await page.getByRole('button', { name: '重试保存' }).click()
+  await expect.poll(() => stored.segments[0].text).toBe('断网期间保留的最新文案')
+  await expect(page.getByText('已同步', { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => localStorage.getItem('insightcut:workspace-pending:ui-assets'))).toBeNull()
+})
+
+test('mobile navigation exposes remaining routes through More and returns keyboard focus', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/workspace/ui-assets')
+  const more = page.getByRole('button', { name: '更多导航', exact: true })
+  await more.click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect(page.getByRole('dialog').getByRole('link', { name: /设置/ })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(more).toBeFocused()
+})
