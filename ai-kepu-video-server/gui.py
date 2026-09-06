@@ -3,19 +3,20 @@ InsightCut 图形界面
 双击 启动.bat 运行
 """
 
+import json
 import os
 import sys
 import threading
 import subprocess
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext, messagebox, filedialog
 
 # 把项目目录加入 Python 路径
 BASE_DIR = Path(__file__).parent
 sys.path.insert(0, str(BASE_DIR))
 
-DRAFT_DIR = Path("D:/edge/JianyingPro Drafts")
+GUI_SETTINGS = BASE_DIR / "data" / "gui.json"
 
 
 class App(tk.Tk):
@@ -25,6 +26,10 @@ class App(tk.Tk):
         self.geometry("680x560")
         self.resizable(False, False)
         self.configure(bg="#1e1e2e")
+        try:
+            self.draft_root = Path(json.loads(GUI_SETTINGS.read_text()).get("draft_root") or BASE_DIR / "output")
+        except (OSError, ValueError):
+            self.draft_root = BASE_DIR / "output"
         self._build_ui()
         self._running = False
 
@@ -106,6 +111,7 @@ class App(tk.Tk):
                                   relief="flat", padx=14, pady=8, cursor="hand2",
                                   activebackground="#3a3a5e", activeforeground=FG)
         self.btn_open.pack(side="left", padx=8)
+        tk.Button(frame_btn, text="选择草稿位置", command=self._choose_draft_folder).pack(side="left", padx=8)
 
     # ── 日志写入 ───────────────────────────────────────────
     def _log(self, msg: str):
@@ -165,7 +171,16 @@ class App(tk.Tk):
                 pipeline._log_callback = log_redirect
 
                 draft_path = self._run_with_logging(pipeline, style, length)
-                self._log(f"[完成] 草稿路径: {draft_path}")
+                from src.export.draft_publication import publish_draft
+                from src.api.routes import _normalize_draft_files_for_location, _draft_preflight, _server_target_os
+                def prepare(staging, destination):
+                    _normalize_draft_files_for_location(staging, str(destination.parent), destination.name, _server_target_os())
+                def verify(path):
+                    result = _draft_preflight(path, _server_target_os())
+                    if not result["valid"]:
+                        raise RuntimeError("；".join(result["issues"]))
+                published = publish_draft(draft_path, self.draft_root, prepare=prepare, verify=verify)
+                self._log(f"[完成] 草稿路径: {published['draft_path']}")
                 if getattr(pipeline, "mp4_path", ""):
                     self._log(f"[完成] MP4 已导出: {pipeline.mp4_path}")
 
@@ -213,10 +228,22 @@ class App(tk.Tk):
             self._status("生成失败，请查看日志")
 
     # ── 打开草稿文件夹 ─────────────────────────────────────
+    def _choose_draft_folder(self):
+        if self._running:
+            return
+        chosen = filedialog.askdirectory(title="选择剪映草稿位置", initialdir=str(self.draft_root))
+        if chosen:
+            self.draft_root = Path(chosen)
+            GUI_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+            GUI_SETTINGS.write_text(json.dumps({"draft_root": chosen}, ensure_ascii=False), encoding="utf-8")
+
     def _open_draft_folder(self):
-        folder = DRAFT_DIR
+        folder = self.draft_root
         if folder.exists():
-            subprocess.Popen(f'explorer "{folder}"')
+            if os.name == "nt":
+                os.startfile(str(folder))
+            else:
+                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(folder)])
         else:
             messagebox.showinfo("提示", f"草稿目录不存在:\n{folder}")
 

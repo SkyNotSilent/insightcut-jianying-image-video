@@ -105,6 +105,8 @@ def validate_staged_draft(draft_dir: Path) -> None:
     import json
 
     content_path = draft_dir / "draft_content.json"
+    if not content_path.is_file() and (draft_dir / "draft_info.json").is_file():
+        content_path = draft_dir / "draft_info.json"
     meta_path = draft_dir / "draft_meta_info.json"
     for required in (content_path, meta_path):
         if not required.is_file():

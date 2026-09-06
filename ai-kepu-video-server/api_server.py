@@ -2,6 +2,7 @@
 FastAPI 应用入口
 """
 
+import re
 import asyncio
 import os
 from contextlib import asynccontextmanager
@@ -13,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 # 本地开发时加载 .env 文件
 env_path = Path(__file__).parent / '.env'
-if env_path.exists():
+if env_path.exists() and os.getenv("INSIGHTCUT_SKIP_DOTENV") != "1":
     try:
         from dotenv import load_dotenv
         load_dotenv(env_path)
@@ -21,6 +22,7 @@ if env_path.exists():
     except ImportError:
         print("未安装 python-dotenv，跳过 .env 文件加载（可使用系统环境变量）")
 
+from src.api.upload_limits import UploadBodyLimit
 from src.api.routes import router
 from src.api.task_manager import task_manager
 from src.api.task_sweeper import task_sweeper
@@ -49,6 +51,10 @@ async def startup_event():
     )
     if interrupted_count:
         logger.warning(f"启动时已将 {interrupted_count} 个遗留任务标记为中断，可继续生成")
+    from src.api.routes import recover_export_jobs
+    await asyncio.to_thread(recover_export_jobs)
+    from src.database import db_client
+    await asyncio.to_thread(db_client.production_recover)
     reconciled_count = await asyncio.to_thread(task_manager.reconcile_completed_tasks)
     if reconciled_count:
         logger.warning(
@@ -67,23 +73,40 @@ async def shutdown_event():
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def _service_lifespan(_app: FastAPI):
     """Own exactly one sweeper for the lifetime of this worker process."""
+    from src.api.task_runtime import task_runtime
+    task_runtime.open()
     await startup_event()
     task_sweeper.start()
     batch_scheduler.start()
+    from src.api.production_flow import scheduler as production_scheduler
+    production_scheduler.start()
     try:
         yield
     finally:
         task_sweeper.stop()
         batch_scheduler.stop()
+        production_scheduler.stop()
+        await asyncio.to_thread(production_scheduler.join, 30)
+        task_runtime.close()
         stopped = await asyncio.to_thread(task_sweeper.join, 30.0)
         if not stopped:
             logger.warning("后台任务巡检线程未在 30 秒内停止")
         batch_stopped = await asyncio.to_thread(batch_scheduler.join, 30.0)
         if not batch_stopped:
             logger.warning("批量预案调度线程未在 30 秒内停止")
+        while not await asyncio.to_thread(task_runtime.wait_idle, 30.0):
+            logger.warning("正在等待已取消的文件操作退出，继续持有维护锁")
         await shutdown_event()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from src.utils.file_lock import file_lock
+    with file_lock(Config.BASE_DIR / "data" / "maintenance.lock", blocking=False):
+        async with _service_lifespan(app):
+            yield
 
 
 # 创建 FastAPI 应用
@@ -93,6 +116,8 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+app.add_middleware(UploadBodyLimit)
 
 
 @app.exception_handler(HTTPException)
@@ -178,7 +203,8 @@ legacy_media_dir.mkdir(parents=True, exist_ok=True)
 
 def _media_type_for_file(path: Path) -> str:
     try:
-        header = path.read_bytes()[:16]
+        with path.open("rb") as stream:
+            header = stream.read(16)
     except OSError:
         header = b""
 
@@ -224,7 +250,7 @@ async def serve_media(file_path: str):
                 requested,
                 media_type=_media_type_for_file(requested),
                 headers={
-                    "Cache-Control": "public, max-age=31536000, immutable",
+                    "Cache-Control": "public, max-age=31536000, immutable" if re.search(r"[0-9a-f]{32}", requested.name) else "no-cache",
                 },
             )
 

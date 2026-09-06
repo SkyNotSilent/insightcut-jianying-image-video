@@ -11,6 +11,8 @@ import tempfile
 import threading
 import zipfile
 from datetime import datetime
+from functools import lru_cache
+from src.utils.media_validation import validate_asset_file
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -60,6 +62,15 @@ def _storage_roots(base_dir: Path) -> tuple[Path, Path]:
     )
 
 
+@lru_cache(maxsize=1024)
+def _valid_content(path, asset_type, size, modified):
+    try:
+        validate_asset_file(path, asset_type)
+        return True
+    except (ValueError, OSError):
+        return False
+
+
 def _resolve_current_file(raw_path, base_dir: Path, allowed_extensions: set[str]) -> tuple[Optional[Path], str]:
     if not raw_path:
         return None, "missing"
@@ -72,10 +83,11 @@ def _resolve_current_file(raw_path, base_dir: Path, allowed_extensions: set[str]
         return None, "invalid_path"
     if resolved.suffix.lower() not in allowed_extensions:
         return None, "unsupported_format"
-    if not any(resolved == root or root in resolved.parents for root in _storage_roots(base_dir)):
-        return None, "outside_storage"
     if not resolved.is_file():
         return None, "file_missing"
+    stat = resolved.stat()
+    if not _valid_content(str(resolved), "image" if allowed_extensions == ALLOWED_IMAGE_EXTENSIONS else "audio", stat.st_size, stat.st_mtime_ns):
+        return None, "invalid_content"
     return resolved, "available"
 
 

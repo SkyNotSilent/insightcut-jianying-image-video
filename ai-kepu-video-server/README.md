@@ -25,14 +25,14 @@ InsightCut 的 FastAPI 后端生成服务，负责把主题或长文案转换为
 ## 本地启动
 
 ```bash
-python -m venv venv
-source venv/bin/activate
+python3.11 -m venv venv311
+source venv311/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 python api_server.py
 ```
 
-需要 Python 3.10+。服务默认仅绑定本机 `127.0.0.1:2002`，访问地址：`http://localhost:2002`
+需要 Python 3.11。服务默认仅绑定本机 `127.0.0.1:2002`，访问地址：`http://localhost:2002`
 
 API 文档：`http://localhost:2002/docs`
 
@@ -107,3 +107,8 @@ make test-all
 **图像接口报错**：检查“模型配置”页或 `.env` 中的图像 API URL、Key、Model 和尺寸参数。
 
 **TTS 失败**：检查 TTS App ID、Token、Cluster 和 Voice Type 是否匹配当前账号套餐。
+
+
+## 批量预案与自动成片
+
+支持 2–50 个主题或完整文稿，批量设置独立，预案完成后可直接全选确认。确认后在后台连续生成图片、配音和 MP4，剪映草稿按需导出。每批并发默认 3、可选 1–10，FFmpeg 同时渲染 1 个。详见 [流程、接口与验收说明](../docs/batch-video-workflow.md)。

@@ -485,7 +485,7 @@ def test_workspace_reports_recovery_and_delivery_capabilities_from_real_files(
     assert assets_complete["health"]["assets_complete"] is True
     assert assets_complete["recovery"]["mode"] == "finalize"
     assert assets_complete["capabilities"]["enter_export"] is True
-    assert assets_complete["capabilities"]["full_video"] is False
+    assert assets_complete["capabilities"]["full_video"] is True
 
 
 def test_awaiting_confirmation_does_not_offer_asset_repair_for_pending_media(

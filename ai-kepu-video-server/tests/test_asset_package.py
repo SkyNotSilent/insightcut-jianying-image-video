@@ -18,7 +18,14 @@ from src.export.asset_package import (
 def _media_file(base_dir: Path, relative: str, content: bytes) -> Path:
     path = base_dir / "data" / "media" / relative
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(content)
+    if path.suffix in {'.png','.jpg','.webp'}:
+        from PIL import Image
+        Image.new('RGB',(8,8),(sum(content)%255,30,80)).save(path)
+    else:
+        import wave
+        with wave.open(str(path),'wb') as output:
+            output.setparams((1,2,24000,0,'NONE','not compressed'))
+            output.writeframes(b'\0\0'*6000)
     return path
 
 
@@ -60,14 +67,14 @@ def test_material_package_uses_current_assets_and_numeric_segment_order(tmp_path
         assert f"{root}/images/002.png" in names
         assert f"{root}/images/003.jpg" in names
         assert f"{root}/audio/001.m4a" in names
-        assert archive.read(f"{root}/images/001.webp") == b"image-one"
+        assert archive.read(f"{root}/images/001.webp") == image_1.read_bytes()
         manifest = json.loads(archive.read(f"{root}/metadata/manifest.json"))
         assert [item["segment_index"] for item in manifest["segments"]] == [0, 1, 10]
         assert [item["text"] for item in manifest["segments"]] == ["第一段", "第二段", "第十一段"]
         assert all(not name.startswith("/") and "../" not in name for name in names)
 
 
-def test_partial_package_reports_missing_and_rejects_outside_storage(tmp_path):
+def test_partial_package_reports_missing_and_rejects_invalid_content(tmp_path):
     outside = tmp_path / "outside.png"
     outside.write_bytes(b"do-not-package")
     audio = _media_file(tmp_path, "task-2/audio/segment.wav", b"audio")
@@ -85,7 +92,7 @@ def test_partial_package_reports_missing_and_rejects_outside_storage(tmp_path):
         assert f"{root}/audio/001.wav" in archive.namelist()
         assert not any(name.startswith(f"{root}/images/001") for name in archive.namelist())
         manifest = json.loads(archive.read(f"{root}/metadata/manifest.json"))
-        assert manifest["segments"][0]["image_missing_reason"] == "outside_storage"
+        assert manifest["segments"][0]["image_missing_reason"] == "invalid_content"
 
 
 def test_package_cache_invalidates_when_current_file_changes(tmp_path):
@@ -97,7 +104,8 @@ def test_package_cache_invalidates_when_current_file_changes(tmp_path):
     assert first["cached"] is False
     assert second["cached"] is True
 
-    image.write_bytes(b"updated-image")
+    from PIL import Image
+    Image.new("RGB",(9,9),"blue").save(image)
     state = material_package_state("task-3", "缓存项目", segments, tmp_path)
     assert state["snapshot_key"] != first["snapshot_key"]
     assert state["package_ready"] is False
@@ -108,7 +116,7 @@ def test_package_cache_invalidates_when_current_file_changes(tmp_path):
     updated = build_material_package("task-3", "缓存项目", segments, tmp_path)
     assert updated["cached"] is False
     with zipfile.ZipFile(updated["zip_path"]) as archive:
-        assert archive.read("缓存项目_素材包/images/001.png") == b"updated-image"
+        assert archive.read("缓存项目_素材包/images/001.png") == image.read_bytes()
 
 
 def test_package_requires_at_least_one_current_file(tmp_path):

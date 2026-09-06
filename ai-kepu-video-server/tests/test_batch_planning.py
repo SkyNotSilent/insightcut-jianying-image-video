@@ -142,8 +142,8 @@ class _StartingExecutor:
         return True
 
 
-def test_scheduler_never_dispatches_more_than_three_global_workers():
-    database = _ConcurrencyDatabase(count=4)
+def test_scheduler_never_dispatches_more_than_ten_global_workers():
+    database = _ConcurrencyDatabase(count=12)
     scheduler = BatchScheduler(
         database=database,
         manager=object(),
@@ -155,13 +155,9 @@ def test_scheduler_never_dispatches_more_than_three_global_workers():
 
     scheduler._dispatch()
     try:
-        assert scheduler.global_concurrency == 3
-        assert database.claimed == [
-            "global-item-0",
-            "global-item-1",
-            "global-item-2",
-        ]
-        assert len(scheduler._workers) == 3
+        assert scheduler.global_concurrency == 10
+        assert database.claimed == [f"global-item-{i}" for i in range(10)]
+        assert len(scheduler._workers) == 10
     finally:
         scheduler.stop()
         for worker in list(scheduler._workers.values()):
@@ -266,7 +262,7 @@ def test_batch_request_accepts_exact_boundaries_and_rejects_out_of_range_values(
             CreateBatchRequest(
                 items=[{"theme": f"非法主题 {index}"} for index in range(count)]
             )
-    for concurrency in (0, 4):
+    for concurrency in (0, 11):
         with pytest.raises(ValidationError):
             CreateBatchRequest(
                 items=[{"theme": "主题一"}, {"theme": "主题二"}],

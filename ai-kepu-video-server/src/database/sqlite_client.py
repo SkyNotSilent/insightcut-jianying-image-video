@@ -11,7 +11,7 @@ import json
 import threading
 from datetime import datetime
 from typing import Optional, List, Dict
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from pathlib import Path
 
 from src.api.error_model import (
@@ -47,11 +47,15 @@ DB_PATH = Path(
 ).expanduser().resolve()
 
 
-class SQLiteClient:
+from .reliability import ReliabilityStore
+from .production import ProductionStore
+
+
+class SQLiteClient(ReliabilityStore, ProductionStore):
     """SQLite 数据库客户端"""
 
     TASK_CHECKPOINT_COLUMNS = frozenset({
-        "script_text", "script_source", "summary", "input_mode", "delete_files_on_delete",
+        "script_text", "script_source", "summary", "input_mode", "input_mode_known", "original_input", "delete_files_on_delete",
         "execution_mode", "workflow_phase", "script_policy", "voice_confirmed",
         "error_code", "error_meta_json", "source_draft_id", "template_id",
         "generation_options_json", "subtitle_options_json",
@@ -88,6 +92,19 @@ class SQLiteClient:
 
         try:
             DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+            if DB_PATH.exists():
+                with closing(sqlite3.connect(str(DB_PATH))) as original:
+                    applied = original.execute("SELECT 1 FROM sqlite_master WHERE name='schema_migrations'").fetchone()
+                    if not applied or not original.execute("SELECT 1 FROM schema_migrations WHERE version='20260906_batch_video'").fetchone():
+                        backup_path = DB_PATH.with_name(DB_PATH.name + ".before-batch-video.bak")
+                        if not backup_path.exists():
+                            with closing(sqlite3.connect(str(backup_path))) as backup:
+                                original.backup(backup)
+                    if not applied or not original.execute("SELECT 1 FROM schema_migrations WHERE version='20260907_batch_archive'").fetchone():
+                        archive_backup = DB_PATH.with_name(DB_PATH.name + '.before-batch-archive.bak')
+                        if not archive_backup.exists():
+                            with closing(sqlite3.connect(str(archive_backup))) as backup:
+                                original.backup(backup)
             conn = sqlite3.connect(str(DB_PATH))
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -702,11 +719,32 @@ class SQLiteClient:
             )
             self._sanitize_legacy_error_storage(cursor)
 
+            self._apply_column_migration(cursor, "20260906_original_script", "tasks", {"original_script_text": "TEXT"})
+            self._apply_migration(cursor, "20260906_reliability", """
+                CREATE TABLE IF NOT EXISTS task_plan_revisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, revision_id TEXT NOT NULL UNIQUE,
+                    task_id TEXT NOT NULL, snapshot_json TEXT NOT NULL, restored INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_plan_revision_task ON task_plan_revisions(task_id,id);
+                CREATE TABLE IF NOT EXISTS export_jobs (
+                    job_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, status TEXT NOT NULL, job_json TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_export_job_task ON export_jobs(task_id);
+            """)
+            from .production import migrate_batch_video
+            conn.commit()
+            cursor.execute("BEGIN IMMEDIATE")
+            migrate_batch_video(cursor)
+            self._apply_column_migration(cursor, '20260907_batch_archive', 'task_batches', {'archived_at': 'TEXT'})
             conn.commit()
             conn.close()
             self._initialized = True
             logger.info(f"SQLite 数据库初始化成功: {DB_PATH}")
         except Exception as e:
+            if "conn" in locals():
+                conn.rollback()
+                conn.close()
             logger.error(f"SQLite 数据库初始化失败: {e}")
             self._initialized = False
 
@@ -1118,6 +1156,7 @@ class SQLiteClient:
         template_id: str = None,
         generation_options: Dict = None,
         subtitle_options: Dict = None,
+        input_mode: str = "script",
     ) -> bool:
         if not self._initialized:
             self._init_db()
@@ -1131,8 +1170,8 @@ class SQLiteClient:
                    (task_id, name, theme, style, length, ratio, voice_type,
                     tts_options_json, status, current_step, execution_mode,
                     workflow_phase, script_policy, voice_confirmed, source_draft_id,
-                    template_id, generation_options_json, subtitle_options_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    template_id, generation_options_json, subtitle_options_json, input_mode, input_mode_known, original_input)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     task_id, name or theme[:20], theme, style, length, ratio,
                     voice_type,
@@ -1142,6 +1181,7 @@ class SQLiteClient:
                     script_policy, 0, source_draft_id, template_id,
                     json.dumps(generation_options or {}, ensure_ascii=False),
                     json.dumps(subtitle_options or {}, ensure_ascii=False),
+                    input_mode, 1, theme,
                 )
             )
             steps = [
@@ -1857,6 +1897,7 @@ class SQLiteClient:
         conn = self._get_conn()
         try:
             cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
             cur.execute("SELECT plan_version FROM tasks WHERE task_id=?", (task_id,))
             row = cur.fetchone()
             if not row:
@@ -1874,6 +1915,10 @@ class SQLiteClient:
             )
             if cur.rowcount <= 0:
                 return None
+            if "text" in fields:
+                texts = cur.execute("SELECT text FROM task_segments WHERE task_id=? ORDER BY segment_index", (task_id,)).fetchall()
+                cur.execute("UPDATE tasks SET original_script_text=COALESCE(original_script_text,script_text), script_text=?, script_source='user_edited' WHERE task_id=?",
+                            ("\n".join(str(item[0] or "") for item in texts), task_id))
             next_version = current + 1
             cur.execute(
                 "UPDATE tasks SET plan_version=?, updated_at=datetime('now','localtime') WHERE task_id=?",
@@ -1903,6 +1948,7 @@ class SQLiteClient:
         conn = self._get_conn()
         try:
             cur = conn.cursor()
+            cur.execute("BEGIN IMMEDIATE")
             cur.execute("SELECT plan_version FROM tasks WHERE task_id=?", (task_id,))
             row = cur.fetchone()
             if not row:
@@ -1910,6 +1956,7 @@ class SQLiteClient:
             current = int(row["plan_version"] or 0)
             if expected_plan_version is not None and current != int(expected_plan_version):
                 return -1
+            self._snapshot_plan(cur, task_id)
             cur.execute("DELETE FROM task_segments WHERE task_id=?", (task_id,))
             for segment in segments:
                 cur.execute(
@@ -2743,14 +2790,14 @@ class SQLiteClient:
                 cur.execute(
                     """UPDATE task_segments
                        SET selected_audio_asset_id=?, audio_path=?, audio_url=?,
-                           audio_voice_type=?, audio_status='completed',
+                           audio_voice_type=?, duration=COALESCE(?,duration), audio_tts_options_json=?, audio_status='completed',
                            audio_error=NULL, audio_error_code=NULL,
                            audio_error_meta_json=NULL, audio_mismatch_confirmed=?,
                            updated_at=datetime('now','localtime')
                        WHERE task_id=? AND segment_index=?""",
                     (
                         asset.get("asset_id"), asset.get("path"), asset.get("url"),
-                        asset.get("voice_type"), int(bool(confirm_text_mismatch)),
+                        asset.get("voice_type"), asset.get("duration"), json.dumps(asset.get("tts_options") or {}), int(bool(confirm_text_mismatch)),
                         task_id, segment_index,
                     ),
                 )
@@ -2845,8 +2892,8 @@ class SQLiteClient:
                 """INSERT INTO production_templates
                    (template_id, name, description, visual_style, text_style, ratio,
                     voice_type, tts_options_json, subtitle_options_json,
-                    generation_options_json, is_default)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    generation_options_json, is_default, length)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     template_id, values.get("name") or "未命名模板",
                     values.get("description"), values.get("visual_style") or "电影质感",
@@ -2854,7 +2901,7 @@ class SQLiteClient:
                     values.get("voice_type"), json.dumps(values.get("tts_options") or {}, ensure_ascii=False),
                     json.dumps(values.get("subtitle_options") or {}, ensure_ascii=False),
                     json.dumps(values.get("generation_options") or {}, ensure_ascii=False),
-                    int(bool(values.get("is_default"))),
+                    int(bool(values.get("is_default"))), values.get("length", 300),
                 ),
             )
             conn.commit()
@@ -2865,7 +2912,7 @@ class SQLiteClient:
 
     def update_production_template(self, template_id: str, values: Dict) -> Dict:
         mapping = {
-            "name": "name", "description": "description",
+            "name": "name", "description": "description", "length": "length",
             "visual_style": "visual_style", "text_style": "text_style",
             "ratio": "ratio", "voice_type": "voice_type",
             "tts_options": "tts_options_json",
@@ -3039,7 +3086,7 @@ class SQLiteClient:
             conn.close()
         return self.get_batch(batch_id)
 
-    def list_batches(self, limit: int = 50, offset: int = 0) -> List[Dict]:
+    def list_batches(self, limit: int = 50, offset: int = 0, archived=None) -> List[Dict]:
         if not self._initialized:
             self._init_db()
         conn = self._get_conn()
@@ -3053,13 +3100,25 @@ class SQLiteClient:
                           SUM(CASE WHEN i.status='cancelled' THEN 1 ELSE 0 END) AS cancelled_count
                    FROM task_batches b
                    LEFT JOIN task_batch_items i ON i.batch_id=b.batch_id
+                   WHERE (? IS NULL OR (b.archived_at IS NOT NULL)=?)
                    GROUP BY b.batch_id
                    ORDER BY b.created_at DESC, b.id DESC LIMIT ? OFFSET ?""",
-                (max(1, min(200, int(limit))), max(0, int(offset))),
+                (archived, archived, max(1, min(200, int(limit))), max(0, int(offset))),
             ).fetchall()
             return [self._decode_batch_row(row) for row in rows]
         finally:
             conn.close()
+
+    def set_batch_archived(self, batch_id: str, archived: bool) -> Dict:
+        if not self._initialized:
+            self._init_db()
+        conn = self._get_conn()
+        try:
+            conn.execute("UPDATE task_batches SET archived_at=CASE WHEN ? THEN COALESCE(archived_at,CURRENT_TIMESTAMP) ELSE NULL END WHERE batch_id=?", (archived, batch_id))
+            conn.commit()
+        finally:
+            conn.close()
+        return self.get_batch(batch_id)
 
     def get_batch(self, batch_id: str) -> Dict:
         if not self._initialized:
@@ -3113,7 +3172,7 @@ class SQLiteClient:
     def claim_next_batch_item(self, *, global_concurrency: int = 3) -> Dict:
         if not self._initialized:
             self._init_db()
-        global_concurrency = max(1, min(3, int(global_concurrency)))
+        global_concurrency = max(1, min(10, int(global_concurrency)))
         conn = self._get_conn()
         try:
             cur = conn.cursor()
@@ -3126,7 +3185,8 @@ class SQLiteClient:
                      AND (SELECT COUNT(*) FROM task_batch_items global_active
                           WHERE global_active.status='running') < ?
                      AND (SELECT COUNT(*) FROM task_batch_items active
-                          WHERE active.batch_id=i.batch_id AND active.status='running') < b.concurrency
+                          WHERE active.batch_id=i.batch_id AND active.status='running')
+                         + (SELECT COUNT(*) FROM production_flows pf WHERE pf.batch_id=i.batch_id AND pf.state='generating_assets') < b.concurrency
                    ORDER BY b.created_at ASC, b.id ASC, i.position ASC, i.id ASC
                    LIMIT 1""",
                 (global_concurrency,),

@@ -109,7 +109,7 @@ class ConcurrentPromptAgent:
 
 class FakeAssetGenerator:
     def __init__(self, output_dir, suffix, fail=False):
-        self.output_dir = Path(output_dir)
+        self.output_dir = Path(output_dir).resolve()
         self.suffix = suffix
         self.fail = fail
         self.calls = []
@@ -907,7 +907,7 @@ def test_initial_image_auth_stops_new_images_and_preserves_completed_assets(
     )
 
     rows = executor_db.get_segments(task_id)
-    assert pipeline.image_generator.calls == [0, 1]
+    assert sorted(pipeline.image_generator.calls) == [0, 1]
     assert pipeline.voiceover_generator.calls == [0, 1, 2, 3, 4]
     assert rows[0]["image_status"] == "completed"
     assert Path(rows[0]["image_path"]).is_file()
@@ -2035,7 +2035,7 @@ def test_new_task_uses_task_owned_output_directory(executor_db, tmp_path, monkey
         "task-1", cancellation=TaskCancellation()
     )
 
-    assert Path(created[0]["output_dir"]) == Path("output/task-1/恢复测试")
+    assert Path(created[0]["output_dir"]) == task_executor_module.Config.BASE_DIR / "output/task-1/恢复测试"
 
 
 def test_resume_uses_legacy_output_directory_from_persisted_path(
@@ -2175,7 +2175,7 @@ def test_dot_dot_project_name_stays_inside_task_output(
         "task-1", cancellation=TaskCancellation()
     )
 
-    task_root = (tmp_path / "output" / "task-1").resolve()
+    task_root = (task_executor_module.Config.BASE_DIR / "output" / "task-1").resolve()
     output_dir = Path(created[0]["output_dir"]).resolve()
     assert output_dir == task_root / "task"
     assert output_dir.is_relative_to(task_root)
@@ -2354,8 +2354,8 @@ def test_sparse_legacy_segment_indexes_are_used_for_db_rows_and_assets(
     assert all(row["image_status"] == "failed" for row in rows)
     assert all(row["audio_status"] == "failed" for row in rows)
     assert {asset["segment_index"] for asset in assets} == {5, 9}
-    assert pipeline.image_generator.calls == [0, 1]
-    assert pipeline.voiceover_generator.calls == [0, 1]
+    assert sorted(pipeline.image_generator.calls) == [0, 1]
+    assert sorted(pipeline.voiceover_generator.calls) == [0, 1]
 
 
 def test_stage_cancellation_drains_and_persists_all_submitted_assets(
@@ -2838,7 +2838,7 @@ def test_task_cancelled_future_does_not_drop_other_successful_result(
 
     rows = executor_db.get_segments("task-1")
     image_assets = executor_db.list_task_assets("task-1", asset_type="image")
-    assert pipeline.image_generator.calls == [0, 1]
+    assert sorted(pipeline.image_generator.calls) == [0, 1]
     assert rows[0]["image_status"] == "pending"
     assert rows[1]["image_status"] == "completed"
     assert [asset["segment_index"] for asset in image_assets] == [1]

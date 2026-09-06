@@ -19,7 +19,7 @@ from .task_runtime import task_runtime
 
 logger = logging.getLogger(__name__)
 
-GLOBAL_BATCH_CONCURRENCY = 3
+GLOBAL_BATCH_CONCURRENCY = 10
 
 
 class BatchScheduler:
@@ -40,7 +40,7 @@ class BatchScheduler:
         self.manager = manager or task_manager
         self.executor = executor or task_executor
         self.runtime = runtime or task_runtime
-        self.global_concurrency = max(1, min(3, int(global_concurrency)))
+        self.global_concurrency = max(1, min(10, int(global_concurrency)))
         self.poll_interval = max(0.02, float(poll_interval))
         self.owner_id = owner_id or f"batch_scheduler_{uuid.uuid4().hex}"
         self._stop_event = threading.Event()
@@ -181,7 +181,8 @@ class BatchScheduler:
             theme=item["theme"],
             name=item.get("name") or item["theme"][:20],
             style=config.get("style") or "温暖感人",
-            length=int(config.get("length") or 300),
+            length=int(config.get("length", 300)),
+            input_mode=config.get("input_mode", "theme"),
             voice_type=config.get("voice_type"),
             ratio=config.get("ratio") or "16:9",
             tts_options=config.get("tts_options") or {},
@@ -218,10 +219,10 @@ class BatchScheduler:
                     task_id=task_id,
                     theme=row.get("theme") or item["theme"],
                     style=row.get("style") or "温暖感人",
-                    length=int(row.get("length") or 300),
+                    length=int(row.get("length", 300)),
                     voice_type=row.get("voice_type"),
                     ratio=row.get("ratio") or "16:9",
-                    input_mode="theme",
+                    input_mode=(item.get("config") or {}).get("input_mode", "theme"),
                 )
         return False
 

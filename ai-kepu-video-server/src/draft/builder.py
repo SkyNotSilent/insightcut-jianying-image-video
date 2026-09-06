@@ -295,28 +295,28 @@ class DraftBuilder:
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        draft_dir_str = str(draft_dir)
+        import hashlib
         converted = 0
-
-        if "materials" in data and "videos" in data["materials"]:
-            for video in data["materials"]["videos"]:
-                if "path" in video and os.path.isabs(video["path"]):
-                    try:
-                        rel = os.path.relpath(video["path"], draft_dir_str)
-                        video["path"] = rel.replace("\\", "/")
-                        converted += 1
-                    except ValueError:
-                        pass
-
-        if "materials" in data and "audios" in data["materials"]:
-            for audio in data["materials"]["audios"]:
-                if "path" in audio and os.path.isabs(audio["path"]):
-                    try:
-                        rel = os.path.relpath(audio["path"], draft_dir_str)
-                        audio["path"] = rel.replace("\\", "/")
-                        converted += 1
-                    except ValueError:
-                        pass
+        for group, folder in (("videos", "images"), ("audios", "voiceovers")):
+            for material in data.get("materials", {}).get(group, []):
+                raw = material.get("path")
+                if not raw:
+                    continue
+                source = Path(raw)
+                if not source.is_absolute():
+                    source = draft_dir / source
+                source = source.resolve()
+                if not source.is_file():
+                    raise FileNotFoundError(f"草稿素材缺失：{source.name}")
+                if not source.is_relative_to(draft_dir.resolve()):
+                    identity = hashlib.sha256(str(source).encode()).hexdigest()[:16]
+                    target = draft_dir / folder / (identity + "_" + source.name)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, target)
+                else:
+                    target = source
+                material["path"] = target.resolve().relative_to(draft_dir.resolve()).as_posix()
+                converted += 1
 
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)

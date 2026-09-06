@@ -42,3 +42,6 @@ logs/
 .DS_Store
 Thumbs.db
 *.swp
+
+# Verified Python 3.11 replacement environment; retain venv/ for rollback.
+venv311/

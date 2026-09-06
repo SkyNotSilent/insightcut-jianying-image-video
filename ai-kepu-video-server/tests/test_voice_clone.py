@@ -131,3 +131,18 @@ def test_delete_hides_referenced_clone_and_removes_unreferenced_clone(tmp_path, 
     assert removed["outcome"] == "deleted"
     assert store.get(removable["clone_id"]) is None
     assert not removed_root.exists()
+
+
+def test_referenced_voice_replacement_creates_version_and_keeps_old_audio(tmp_path, temp_db):
+    source=tmp_path/'first.wav';replacement=tmp_path/'second.wav'
+    write_wav(source,.2);write_wav(replacement,.4)
+    store=VoiceCloneStore(tmp_path,temp_db)
+    old=store.create('原音色',source,consent_confirmed=True)
+    store.mark_ready(old['clone_id'],source)
+    temp_db.create_task('uses-old','旧项目','风格',100,voice_type=old['voice_type'])
+    old_bytes=Path(old['reference_path']).read_bytes()
+    new=store.replace_reference(old['clone_id'],replacement)
+    assert new['clone_id'] != old['clone_id']
+    assert new['status']=='draft' and not new['is_enabled']
+    assert temp_db.get_task('uses-old')['voice_type']==old['voice_type']
+    assert Path(old['reference_path']).read_bytes()==old_bytes

@@ -3,6 +3,7 @@ FFmpeg 视频导出模块
 将图片 + 配音 + 字幕直接拼接为 MP4，与剪映草稿并行输出。
 """
 
+import time
 import json
 import logging
 import random
@@ -412,7 +413,7 @@ class FFmpegExporter:
         ]
 
         logger.debug(f"  [FFmpeg 段 {index+1}] 编码 {duration_s:.1f}s ...")
-        result = subprocess.run(
+        result = self._run_command(
             cmd, capture_output=True, text=True, timeout=600,
             encoding="utf-8", errors="replace",
         )
@@ -423,6 +424,30 @@ class FFmpegExporter:
         return output_path
 
     # ── 拼接 ──────────────────────────────────────────────────────
+
+    def _run_command(self, cmd, **kwargs):
+        should_cancel = getattr(self, "_should_cancel", None)
+        if not should_cancel:
+            return subprocess.run(cmd, **kwargs)
+        timeout = kwargs.pop("timeout")
+        kwargs.pop("capture_output", None)
+        started = time.monotonic()
+        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs) as process:
+            try:
+                while True:
+                    if should_cancel():
+                        raise RenderCancelled("视频生成已取消")
+                    if time.monotonic() - started >= timeout:
+                        raise subprocess.TimeoutExpired(cmd, timeout)
+                    try:
+                        stdout, stderr = process.communicate(timeout=.2)
+                        return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+                    except subprocess.TimeoutExpired:
+                        continue
+            except BaseException:
+                process.kill()
+                process.communicate()
+                raise
 
     def _concat_clips(self, clip_paths: List[str], output_path: str) -> str:
         """使用 concat demuxer 拼接视频片段（简单高效）"""
@@ -455,7 +480,7 @@ class FFmpegExporter:
             ]
 
             logger.debug(f"  [FFmpeg] 执行拼接命令...")
-            result = subprocess.run(
+            result = self._run_command(
                 cmd, capture_output=True, text=True, timeout=120,
                 encoding="utf-8", errors="replace",
             )
@@ -484,6 +509,7 @@ class FFmpegExporter:
         animation_params: Optional[List[dict]] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
     ) -> str:
+        self._should_cancel = should_cancel
         logger.info(f"[FFmpeg] 开始导出 MP4，共 {len(segments)} 段")
 
         def raise_if_cancelled() -> None:

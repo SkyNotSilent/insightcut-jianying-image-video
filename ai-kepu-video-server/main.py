@@ -56,7 +56,7 @@ def _api_request(method: str, path: str, payload=None):
 def _run_batch_cli(arguments) -> None:
     parser = argparse.ArgumentParser(prog="python main.py batch", description="批量创建预案")
     parser.add_argument("--file", required=True, help="每行一个主题的 UTF-8 文本文件")
-    parser.add_argument("--concurrency", type=int, choices=(1, 2, 3), default=1)
+    parser.add_argument("--concurrency", type=int, choices=range(1, 11), default=3)
     parser.add_argument("--no-wait", action="store_true")
     parser.add_argument("--style", default="温暖感人")
     parser.add_argument("--ratio", choices=("16:9", "9:16", "3:4"), default="16:9")

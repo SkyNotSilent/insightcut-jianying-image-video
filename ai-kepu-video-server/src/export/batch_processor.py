@@ -1,6 +1,5 @@
 """
-批量处理器
-批量处理多个主题
+未实现的旧批处理占位模块。可用的批量预案入口为 main.py batch / Web 批量预案。
 """
 
 import logging
@@ -27,24 +26,7 @@ class BatchProcessor:
         
     def run(self):
         """运行批量处理"""
-        logger.info(f"开始批量处理: {len(self.themes)} 个主题")
-        
-        for i, theme in enumerate(self.themes, 1):
-            logger.info(f"处理第 {i}/{len(self.themes)} 个主题: {theme}")
-            
-            try:
-                # TODO: 调用主流程
-                # from src.core.pipeline import VideoEditorPipeline
-                # editor = VideoEditorPipeline(theme)
-                # editor.run()
-                
-                logger.info(f"主题 {theme} 处理完成")
-                
-            except Exception as e:
-                logger.error(f"主题 {theme} 处理失败: {e}")
-                continue
-        
-        logger.info("批量处理完成")
+        raise NotImplementedError("旧批处理占位模块未实现，请使用 main.py batch 或 Web 批量预案")
 
 
 if __name__ == "__main__":

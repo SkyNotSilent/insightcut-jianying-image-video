@@ -15,6 +15,22 @@ from src.database.sqlite_client import SQLiteClient
 from src.utils import local_uploader as uploader_module
 
 
+def image_bytes(label):
+    from PIL import Image
+    stream = io.BytesIO()
+    Image.new("RGB", (8, 8), (sum(label.encode()) % 256, 90, 120)).save(stream, format="PNG")
+    return stream.getvalue()
+
+
+def audio_bytes():
+    import wave
+    stream = io.BytesIO()
+    with wave.open(stream, "wb") as output:
+        output.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
+        output.writeframes(b"\0\0" * 24000)
+    return stream.getvalue()
+
+
 @pytest.fixture
 def temp_db(tmp_path, monkeypatch):
     monkeypatch.setattr(sqlite_client_module, "DB_PATH", tmp_path / "local.db")
@@ -67,9 +83,9 @@ def test_select_image_accepts_same_and_cross_segment_versions_without_rewriting_
     current = images_dir / "current.png"
     history = images_dir / "history.png"
     other = images_dir / "other-segment.png"
-    current.write_bytes(b"current")
-    history.write_bytes(b"history")
-    other.write_bytes(b"other")
+    current.write_bytes(image_bytes("current"))
+    history.write_bytes(image_bytes("history"))
+    other.write_bytes(image_bytes("other"))
     task_id = "history-select"
     _create_task(temp_db, task_id)
     temp_db.save_segments(
@@ -202,7 +218,7 @@ def test_cross_segment_audio_requires_text_mismatch_confirmation(
     audio_dir = base_dir / "output" / "project-a" / "voiceovers"
     audio_dir.mkdir(parents=True)
     audio_file = audio_dir / "source.wav"
-    audio_file.write_bytes(b"audio")
+    audio_file.write_bytes(audio_bytes())
     task_id = "audio-cross-select"
     _create_task(temp_db, task_id)
     temp_db.save_segments(task_id, [
@@ -300,7 +316,7 @@ def test_review_first_upload_without_draft_creates_history_and_downloadable_file
     monkeypatch.setattr(uploader_module, "LocalUploader", FakeUploader)
     upload = UploadFile(
         filename="replacement.png",
-        file=io.BytesIO(b"uploaded-image"),
+        file=io.BytesIO(image_bytes("uploaded-image")),
         headers=Headers({"content-type": "image/png"}),
     )
 
@@ -308,7 +324,7 @@ def test_review_first_upload_without_draft_creates_history_and_downloadable_file
 
     uploaded_path = Path(result["image_path"])
     assert uploaded_path.is_file()
-    assert uploaded_path.read_bytes() == b"uploaded-image"
+    assert uploaded_path.read_bytes() == image_bytes("uploaded-image")
     assert uploaded_path.is_relative_to(base_dir / "output" / task_id)
     assert temp_db.get_task(task_id)["result"] is None
     segment = temp_db.get_segments(task_id)[0]
@@ -329,7 +345,7 @@ def test_review_first_upload_without_draft_creates_history_and_downloadable_file
         names = archive.namelist()
         assert len(names) == 1
         assert names[0].startswith("uploads/08_")
-        assert archive.read(names[0]) == b"uploaded-image"
+        assert archive.read(names[0]) == image_bytes("uploaded-image")
 
 
 def test_asset_download_resolves_all_supported_relative_roots_and_preserves_records(
@@ -345,7 +361,7 @@ def test_asset_download_resolves_all_supported_relative_roots_and_preserves_reco
     }
     for key, path in paths.items():
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(key.encode())
+        path.write_bytes(audio_bytes() if path.suffix == ".wav" else image_bytes(key))
     outside = tmp_path / "outside.png"
     outside.write_bytes(b"must-not-download")
     task_id = "relative-download"
@@ -448,8 +464,8 @@ def test_asset_download_resolves_all_supported_relative_roots_and_preserves_reco
     bundle = asyncio.run(routes.download_task_assets(task_id, type="all"))
     body = asyncio.run(_stream_bytes(bundle))
     with zipfile.ZipFile(io.BytesIO(body)) as archive:
-        archived_payloads = {archive.read(name) for name in archive.namelist()}
-    assert archived_payloads == {key.encode() for key in paths}
+        archived_payloads = {archive.read(name) for name in archive.namelist() if name != "未包含素材说明.json"}
+    assert archived_payloads == {path.read_bytes() for path in paths.values()}
     assert b"must-not-download" not in archived_payloads
 
     after_assets = {

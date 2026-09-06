@@ -1,3 +1,4 @@
+from pathlib import Path
 import base64
 from types import SimpleNamespace
 
@@ -179,7 +180,7 @@ def test_content_policy_rejection_uses_safe_fallback_without_sleep(tmp_path, mon
     assert path.fallback_used is True
     assert path.submitted_prompt == calls[1]["prompt"]
     assert path.requested_prompt == calls[0]["prompt"]
-    assert (tmp_path / "segment_000.png").is_file()
+    assert Path(path).is_file()
 
 
 def test_non_retryable_bad_request_is_not_replayed(tmp_path, monkeypatch):

@@ -5,13 +5,15 @@
 
 import logging
 import json
+import uuid
 import time
 import zipfile
 import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Event, Thread
+from threading import Event
+from .work_limits import GenerationThread as Thread
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from typing import Any, Dict, List, Optional
 from .task_manager import CompletionIntegrityError, task_manager, TaskStatus
@@ -295,7 +297,7 @@ def _task_output_dir(task_id: str, draft_name: str, segments: List[dict]) -> Pat
             if path.parent.name in {"images", "voiceovers", "audio"}:
                 resolved = _resolve_local_path(str(path)) or path
                 return resolved.parent.parent
-    task_root = Path("output") / task_id
+    task_root = Config.BASE_DIR / "output" / task_id
     candidate = task_root / _safe_project_name(draft_name)
     try:
         candidate.resolve().relative_to(task_root.resolve())
@@ -336,6 +338,16 @@ def _operation_targets_with_state(
             target["error_code"] = error_code
             target["error_meta"] = error_meta
     return targets
+
+
+def _audio_duration(path):
+    if not path:
+        return None
+    try:
+        from src.utils.media_validation import validate_asset_file
+        return validate_asset_file(path, "audio")["duration"]
+    except (ValueError, OSError):
+        return None
 
 
 class TaskExecutor:
@@ -447,6 +459,8 @@ class TaskExecutor:
             return "already_running"
 
         segments = db_client.get_segments(task_id)
+        if task_row.get("input_mode_known") == 0 and not task_row.get("script_text") and not segments:
+            return "input_mode_required"
         if task_row.get("status") not in {
             TaskStatus.INTERRUPTED.value,
             TaskStatus.FAILED.value,
@@ -824,6 +838,9 @@ class TaskExecutor:
             subtitle_options=_task_subtitle_options(task_row),
             generation_options=_task_generation_options(task_row),
         )
+        if cancellation and getattr(pipeline, "image_generator", None):
+            pipeline.image_generator.on_provider_wait = cancellation.provider_wait
+            pipeline.image_generator.cancellation = cancellation
         try:
             if cancellation:
                 cancellation.raise_if_cancelled()
@@ -1103,6 +1120,9 @@ class TaskExecutor:
             subtitle_options=_task_subtitle_options(task_row),
             generation_options=_task_generation_options(task_row),
         )
+        if cancellation and getattr(pipeline, "image_generator", None):
+            pipeline.image_generator.on_provider_wait = cancellation.provider_wait
+            pipeline.image_generator.cancellation = cancellation
         parts = str(task_row.get("style") or "").split("|", 2)
         visual_style = parts[1] if len(parts) > 1 and parts[1] else "写实风格"
         visual_style_suffix = parts[2] if len(parts) > 2 and parts[2] else None
@@ -1120,7 +1140,7 @@ class TaskExecutor:
                 cancellation.raise_if_cancelled()
             index = int(target["segment_index"])
             segment = by_index[index]
-            stamp = f"{int(time.time())}_{operation_id[:8]}"
+            stamp = uuid.uuid4().hex
             if target["asset_type"] == "image":
                 prompt = str(segment.get("image_prompt") or "").strip()
                 if not prompt:
@@ -1297,6 +1317,7 @@ class TaskExecutor:
                             storage_warning = result.get("warning")
                             updates = {
                                 "audio_path": result["path"],
+                                "duration": _audio_duration(result["path"]),
                                 "audio_url": result["url"],
                                 "audio_status": "completed",
                                 "audio_error": storage_warning.safe_message if storage_warning else None,
@@ -1588,6 +1609,9 @@ class TaskExecutor:
                 subtitle_options=_task_subtitle_options(task_row),
                 generation_options=_task_generation_options(task_row),
             )
+            if cancellation and getattr(pipeline, "image_generator", None):
+                pipeline.image_generator.on_provider_wait = cancellation.provider_wait
+                pipeline.image_generator.cancellation = cancellation
             pipeline.draft_builder.build(
                 segments=[segment.get("text") or "" for segment in segments],
                 media_paths=media_paths,
@@ -1790,6 +1814,9 @@ class TaskExecutor:
                 subtitle_options=_task_subtitle_options(task_row),
                 generation_options=_task_generation_options(task_row),
             )
+            if cancellation and getattr(pipeline, "image_generator", None):
+                pipeline.image_generator.on_provider_wait = cancellation.provider_wait
+                pipeline.image_generator.cancellation = cancellation
 
             # 步骤 1: 文案改写 / 主题生成
             logger.info(f"[{task_id}] [1/6] 开始生成/改写脚本...")
@@ -2173,7 +2200,7 @@ class TaskExecutor:
                     segment_voice, segment_options, _, _ = segment_audio_settings[i]
                     path = pipeline.voiceover_generator.generate(
                         seg,
-                        filename=f"seg_{i:03d}",
+                        filename=f"seg_{i:03d}_{uuid.uuid4().hex}",
                         voice_type=segment_voice,
                         speed_level=segment_options.get("speed_level"),
                         volume_ratio=segment_options.get("volume_ratio"),
@@ -2229,7 +2256,7 @@ class TaskExecutor:
                     }
 
             local_uploader = LocalUploader()
-            upload_ts = int(time.time())
+            upload_ts = uuid.uuid4().hex
 
             def persist_segment_asset(
                 i: int,
@@ -2282,6 +2309,7 @@ class TaskExecutor:
                     ) = segment_audio_settings[i]
                     updates = {
                         "audio_path": path,
+                        "duration": _audio_duration(path),
                         "audio_url": url,
                         "audio_status": status,
                         "audio_error": final_error.safe_message if final_error else None,
@@ -2726,6 +2754,7 @@ class TaskExecutor:
                     'image_status': image_status,
                     'image_error': image_error,
                     'audio_path': audio_path,
+                    'duration': _audio_duration(audio_path),
                     'audio_url': audio_url,
                     'audio_status': audio_status,
                     'audio_error': audio_error,

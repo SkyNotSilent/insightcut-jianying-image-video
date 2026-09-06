@@ -311,6 +311,7 @@ class TaskManager:
         generation_options: Optional[Dict] = None,
         subtitle_options: Optional[Dict] = None,
         task_id: Optional[str] = None,
+        input_mode: str = "script",
     ) -> str:
         """创建新任务"""
         task_id = task_id or uuid.uuid4().hex
@@ -328,6 +329,7 @@ class TaskManager:
             tts_options=task.tts_options,
             execution_mode=execution_mode,
             script_policy=script_policy,
+            input_mode=input_mode,
             source_draft_id=source_draft_id,
             template_id=template_id,
             generation_options=generation_options,
@@ -605,6 +607,8 @@ class TaskManager:
 
         task_id = data["task_id"]
         if task_runtime.is_running(task_id):
+            if task_runtime.stalled(task_id, _stale_task_timeout_seconds(data.get("current_step") or "pending")):
+                task_runtime.request_cancel(task_id)
             return False
 
         step_name = data.get("current_step") or "pending"
@@ -754,6 +758,13 @@ class TaskManager:
             draft_path,
             segments_count,
         )
+        if draft_issue and any(f['state'] == 'completed' for f in db_client.production_list(task_id=task_id)):
+            # A completed MP4 does not require an editable draft to have been built.
+            from .routes import _preview_state
+            from types import SimpleNamespace
+            task = SimpleNamespace(**{**data, 'result': SimpleNamespace(**result) if isinstance(result, dict) else result})
+            if _preview_state(task, _segments)['valid']:
+                draft_issue = None
         if not missing and not draft_issue:
             return False
         self._interrupt_for_integrity(task_id, missing, draft_issue)

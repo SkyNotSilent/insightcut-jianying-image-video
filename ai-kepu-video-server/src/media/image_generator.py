@@ -9,6 +9,7 @@ import logging
 import re
 import threading
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -103,7 +104,7 @@ class ImageGenerator:
             style_suffix: 自定义风格 prompt 后缀，优先级高于 style 预设
             filename: 自定义文件名（不含扩展名），如果为 None 则使用 segment_{index:03d}
         """
-        output_stem = filename or f"segment_{index:03d}"
+        output_stem = filename or f"segment_{index:03d}_{uuid.uuid4().hex}"
 
         # 组合 prompt + 风格
         suffix = (style_suffix or "").strip() or STYLE_PRESETS.get(style, STYLE_PRESETS["写实风格"])
@@ -166,7 +167,7 @@ class ImageGenerator:
                     attempt + 1,
                     wait_seconds,
                 )
-                time.sleep(wait_seconds)
+                self._pause(wait_seconds)
                 attempt += 1
             except Exception as e:
                 safe = classify_exception(e, provider="agnes")
@@ -178,7 +179,7 @@ class ImageGenerator:
                     attempt + 1,
                     wait_seconds,
                 )
-                time.sleep(wait_seconds)
+                self._pause(wait_seconds)
                 attempt += 1
         data = resp.json()
 
@@ -272,6 +273,17 @@ class ImageGenerator:
             "apihub.agnes-ai.com:443",
         }
 
+    def _pause(self, seconds):
+        wait = getattr(self, 'on_provider_wait', None)
+        token = getattr(self, 'cancellation', None)
+        if wait: wait(True)
+        try:
+            if token:
+                if token._cancelled.wait(seconds): token.raise_if_cancelled()
+            else: time.sleep(seconds)
+        finally:
+            if wait: wait(False)
+
     def _wait_for_rate_limit(self) -> None:
         with _RATE_LIMIT_LOCK:
             while True:
@@ -288,7 +300,7 @@ class ImageGenerator:
                     0.01,
                     _IMAGE_RATE_WINDOW_SECONDS - (now - _IMAGE_REQUEST_TIMESTAMPS[0]),
                 )
-                time.sleep(wait_seconds)
+                self._pause(wait_seconds)
 
     def _retry_delay(self, resp, attempt: int = 0) -> float:
         if resp is not None and resp.status_code == 429:
@@ -319,7 +331,7 @@ class ImageGenerator:
                         attempt + 1,
                         wait_seconds,
                     )
-                    time.sleep(wait_seconds)
+                    self._pause(wait_seconds)
         if item.get("b64_json"):
             return base64.b64decode(item["b64_json"])
         if item.get("base64"):

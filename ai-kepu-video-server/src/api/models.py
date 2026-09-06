@@ -84,14 +84,16 @@ class CreateTaskRequest(BaseModel):
 
 class BatchItemRequest(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
-    theme: str = Field(..., min_length=1, max_length=100)
+    theme: Optional[str] = Field(None, min_length=1, max_length=100)
+    content: Optional[str] = Field(None, min_length=1, max_length=5000)
 
 
 class CreateBatchRequest(BaseModel):
     """Create 2-50 review-first projects sharing one production preset."""
 
     items: List[BatchItemRequest] = Field(..., min_length=2, max_length=50)
-    concurrency: int = Field(1, ge=1, le=3)
+    input_mode: Literal["theme", "script"] = "theme"
+    concurrency: int = Field(3, ge=1, le=10)
     style: str = Field(default="温暖感人")
     ratio: str = Field(default="16:9")
     length: int = Field(default=300, ge=0, le=2000)

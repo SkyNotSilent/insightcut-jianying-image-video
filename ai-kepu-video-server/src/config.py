@@ -3,11 +3,15 @@
 """
 import json
 import os
+import uuid
+from src.utils.file_lock import file_lock
 from copy import deepcopy
 from pathlib import Path
 
 
 def _load_local_env() -> None:
+    if os.getenv("INSIGHTCUT_SKIP_DOTENV") == "1":
+        return
     env_path = Path(__file__).resolve().parent.parent / ".env"
     if not env_path.exists():
         return
@@ -44,6 +48,10 @@ def _clamp_int(value, default: int, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))
+
+
+class ConfigConflict(ValueError):
+    pass
 
 
 class Config:
@@ -153,6 +161,7 @@ class Config:
     @classmethod
     def load_model_config(cls) -> dict:
         config = deepcopy(cls.default_model_config())
+        config["revision"] = "initial"
         config_file = cls._resolve_config_file()
         if not config_file.exists():
             cls._normalize_model_config(config)
@@ -165,6 +174,7 @@ class Config:
             cls._normalize_model_config(config)
             return config
 
+        config["revision"] = str(overrides.get("revision") or "legacy")
         for section in ("llm", "image", "tts", "generation"):
             if isinstance(overrides.get(section), dict):
                 config[section].update({
@@ -177,22 +187,28 @@ class Config:
 
     @classmethod
     def save_model_config(cls, config: dict) -> dict:
-        current = cls.load_model_config()
-        incoming = config or {}
-
-        for section in ("llm", "image", "tts", "generation"):
-            if isinstance(incoming.get(section), dict):
-                current[section].update({
-                    key: value
-                    for key, value in incoming[section].items()
-                    if value is not None
-                })
-        cls._normalize_model_config(current)
-
-        cls.CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with cls.CONFIG_FILE.open("w", encoding="utf-8") as f:
-            json.dump(current, f, ensure_ascii=False, indent=2)
-        return current
+        with file_lock(cls.CONFIG_FILE.with_suffix(".lock")):
+            current = cls.load_model_config()
+            incoming = config or {}
+            if incoming.get("revision") and incoming["revision"] != current.get("revision"):
+                raise ConfigConflict("设置已在其他页面更新，请重新加载后重试")
+            for section in ("llm", "image", "tts", "generation"):
+                if isinstance(incoming.get(section), dict):
+                    current[section].update({key: value for key, value in incoming[section].items() if value is not None})
+            cls._normalize_model_config(current)
+            current["revision"] = uuid.uuid4().hex
+            cls.CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            temporary = cls.CONFIG_FILE.with_name("." + cls.CONFIG_FILE.name + "-" + uuid.uuid4().hex)
+            try:
+                with temporary.open("w", encoding="utf-8") as stream:
+                    os.chmod(temporary, 0o600)
+                    json.dump(current, stream, ensure_ascii=False, indent=2)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, cls.CONFIG_FILE)
+            finally:
+                temporary.unlink(missing_ok=True)
+            return current
 
     @classmethod
     def _normalize_llm_config(cls, config: dict) -> None:

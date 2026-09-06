@@ -3,6 +3,7 @@
 编排整个视频编辑流程
 """
 
+import uuid
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -36,6 +37,7 @@ class VideoEditorPipeline:
         self.theme = theme
         self.config_path = config_path
         self.output_dir = Path(output_dir)
+        self._run_root = self.output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.generation_options = {
@@ -241,6 +243,7 @@ class VideoEditorPipeline:
                 segments=self.segments,
                 media_paths=self.media_paths,
                 draft_name=draft_name,
+                output_dir=str(self.output_dir / "drafts" / draft_name),
                 voiceover_files=self.voiceover_files,
             )
 
@@ -276,5 +279,11 @@ class VideoEditorPipeline:
 
     def run(self, style: str = "温暖感人", length: int = 300) -> str:
         """完整流程，向下兼容 main.py 和 gui.py。"""
+        self.output_dir = self._run_root / ("run-" + uuid.uuid4().hex)
+        self.output_dir.mkdir(parents=True, exist_ok=False)
+        self.image_generator.output_dir = self.output_dir / "images"
+        self.voiceover_generator.output_dir = self.output_dir / "voiceovers"
+        self.image_generator.output_dir.mkdir()
+        self.voiceover_generator.output_dir.mkdir()
         self.generate_script(style=style, length=length)
         return self.build_from_script()

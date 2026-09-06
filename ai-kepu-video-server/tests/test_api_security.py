@@ -31,4 +31,4 @@ def test_media_response_does_not_add_wildcard_cors(monkeypatch, tmp_path):
 
     assert response.media_type == "image/png"
     assert "access-control-allow-origin" not in response.headers
-    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert response.headers["cache-control"] == "no-cache"

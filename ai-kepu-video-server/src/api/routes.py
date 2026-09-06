@@ -81,6 +81,9 @@ from src.utils.path_fixer import (
 from src.utils.rendering import canvas_for_ratio, normalize_ratio
 from src.utils.subtitle_text import normalize_subtitle_text
 
+from .work_limits import run_io, run_query, export_pool, render_slot
+from src.utils.media_validation import validate_image, validate_asset_file, MAX_BATCH_IMAGE_BYTES
+
 router = APIRouter(prefix="/ai/native/video/kepu", tags=["tasks"])
 logger = logging.getLogger(__name__)
 
@@ -139,7 +142,7 @@ def _snapshot_tts_options(voice_type: str, options: Optional[dict] = None) -> di
     return snapshot
 
 
-def _resolve_new_task_voice(voice_type: Optional[str]) -> str:
+def _resolve_new_task_voice(voice_type: Optional[str], *, validate=True) -> str:
     config = Config.tts_config()
     default_provider = (config.get("provider") or "doubao").lower()
     if voice_type:
@@ -158,6 +161,8 @@ def _resolve_new_task_voice(voice_type: Optional[str]) -> str:
             )
         )
 
+    if not validate:
+        return selection.key
     enabled_providers = config.get("enabled_providers") or ["doubao", "mimo"]
     if selection.provider not in enabled_providers:
         raise HTTPException(status_code=400, detail=f"{selection.provider} TTS 当前未启用")
@@ -230,10 +235,10 @@ def _safe_draft_name(name: str, task_id: str) -> str:
 
 
 def _validate_upload_image(file: UploadFile):
-    content_type = (file.content_type or "").lower()
-    suffix = Path(file.filename or "").suffix.lower()
-    if content_type not in ALLOWED_IMAGE_CONTENT_TYPES and suffix not in ALLOWED_IMAGE_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="只支持 JPG、PNG、WEBP 格式的图片")
+    try:
+        return validate_image(file.file)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 def _decode_plain_text(content: bytes) -> str:
@@ -256,7 +261,13 @@ def _normalize_document_text(text: str) -> str:
 def _extract_docx_text(content: bytes) -> str:
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            document_xml = archive.read("word/document.xml")
+            info = archive.getinfo("word/document.xml")
+            if info.file_size > 40 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="DOCX 正文解压后不能超过 40 MiB")
+            with archive.open(info) as document:
+                document_xml = document.read(40 * 1024 * 1024 + 1)
+            if len(document_xml) > 40 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="DOCX 正文过大")
     except KeyError:
         raise HTTPException(status_code=400, detail="DOCX 文件缺少正文内容")
     except zipfile.BadZipFile:
@@ -481,6 +492,8 @@ def _plan_fingerprint(task_row: dict, segments: List[dict]) -> str:
 
 def _task_draft_path(task) -> Path:
     raw_path = getattr(getattr(task, "result", None), "draft_path", None)
+    if not raw_path:
+        return Config.BASE_DIR / "output" / task.task_id / "video"
     resolved = _workspace_resolve_directory(raw_path)
     if resolved is not None:
         return resolved
@@ -493,8 +506,6 @@ def _preview_manifest_path(task) -> Path:
 
 
 def _read_preview_manifest(task) -> Optional[dict]:
-    if not task.result or not task.result.draft_path:
-        return None
     path = _preview_manifest_path(task)
     if not path.exists():
         return None
@@ -573,9 +584,9 @@ def _draft_zip_path(task) -> Path:
     return draft_path / f"{draft_path.name}.zip"
 
 
-def _pack_draft_zip(task) -> Path:
-    draft_path = Path(task.result.draft_path)
-    zip_path = _draft_zip_path(task)
+def _pack_draft_zip(task, draft_path=None) -> Path:
+    draft_path = Path(draft_path or task.result.draft_path)
+    zip_path = draft_path / (draft_path.name + ".zip")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for file_path in draft_path.rglob("*"):
             if not file_path.is_file():
@@ -745,7 +756,8 @@ def _mac_material_folder(path: Path, default_folder: str) -> str:
 def _media_suffix_from_magic(path: Path) -> Optional[str]:
     """Return the real image/video suffix when the file header is unambiguous."""
     try:
-        header = path.read_bytes()[:32]
+        with path.open("rb") as stream:
+            header = stream.read(32)
     except Exception:
         return None
     if header.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -857,6 +869,13 @@ def _normalize_mac_draft_files(draft_dir: Path, draft_root: str, draft_name: str
     canvas.setdefault("height", _task_canvas_from_ratio(ratio)["height"])
     content["path"] = ""
 
+    final_dir = Path(draft_root) / draft_name
+    if final_dir.resolve() != draft_dir.resolve():
+        for group in ("videos", "audios"):
+            for material in content.get("materials", {}).get(group, []):
+                if material.get("path"):
+                    material["path"] = str(final_dir / Path(material["path"]).relative_to(draft_dir))
+
     info_path.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
     if content_path.name == "draft_content.json":
         content_path.unlink(missing_ok=True)
@@ -956,12 +975,19 @@ def _draft_preflight(draft_dir: Path, target_os: Optional[str] = None) -> dict:
     }
 
 
-def _set_task_result_preserving(task, segments_count: int, draft_url: Optional[str] = None, video_url: Optional[str] = None):
+def _set_task_result_preserving(task, segments_count: int, draft_url: Optional[str] = None, video_url: Optional[str] = None, draft_path=None):
     existing_draft_url = task.result.draft_url if task.result else None
     existing_video_url = task.result.video_url if task.result else None
+    if draft_path and str(draft_path) != str(getattr(task.result, "draft_path", "")):
+        # Rebuilding an editable draft must retain the independently rendered MP4.
+        manifest = _read_preview_manifest(task)
+        if manifest:
+            manifest_path = Path(draft_path) / "previews" / "manifest_full.json"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
     task_manager.set_task_result(
         task.task_id,
-        task.result.draft_path,
+        str(draft_path or _task_draft_path(task)),
         segments_count,
         draft_url=draft_url if draft_url is not None else existing_draft_url,
         video_url=video_url if video_url is not None else existing_video_url,
@@ -1154,9 +1180,59 @@ def _asset_to_response(asset: dict, request: Request) -> dict:
     }
 
 
+def _persist_export_job(job):
+    save = getattr(mysql_client, "save_export_job", None)
+    if callable(save):
+        save(job)
+
+
+def _load_persisted_exports(task_id=None):
+    load = getattr(mysql_client, "load_export_jobs", None)
+    if callable(load):
+        with EXPORT_JOBS_LOCK:
+            for job in load(task_id):
+                EXPORT_JOBS[job["job_id"]] = job
+
+
+def recover_export_jobs():
+    from src.export.draft_publication import _recover
+    from src.utils.file_lock import file_lock
+    _load_persisted_exports()
+    for job in list(EXPORT_JOBS.values()):
+        params = job.get("params") or {}
+        root = params.get("draft_root")
+        if root and Path(root).is_dir():
+            with file_lock(Path(root) / ".insightcut" / "publication.lock"):
+                _recover(Path(root).resolve())
+        if not mysql_client.get_task(job["task_id"]):
+            continue
+        if job["status"] == "processing":
+            safe = make_safe_error(ErrorCode.TIMEOUT, provider="export")
+            _update_export_job(job["job_id"], status="failed", message="服务已重启，请重新导出",
+                               error="导出中断，已有有效文件已保留", error_code=safe.code.value, error_meta=safe.metadata())
+        elif job["status"] == "pending":
+            if task_runtime.register_export(job["task_id"], job["job_id"]):
+                _submit_export(job, params.get("use_preview", True), params)
+
+
 def _export_job_snapshot(job_id: str) -> dict:
     with EXPORT_JOBS_LOCK:
+        load = getattr(mysql_client, "load_export_job", None)
+        stored = load(job_id) if callable(load) else None
+        if stored:
+            EXPORT_JOBS[job_id] = stored
         return dict(EXPORT_JOBS.get(job_id, {}))
+
+
+def _validate_completed_export(job):
+    if job.get("status") != "completed":
+        return job
+    result = job.get("result") or {}
+    keys = {"mp4": ("video_path",), "draft": ("zip_path", "draft_path"), "draft_local": ("draft_path",), "materials": ("zip_path",)}.get(job.get("target"), ())
+    if keys and any(not result.get(key) or not Path(result[key]).exists() for key in keys):
+        _update_export_job(job["job_id"], status="failed", message="导出文件已缺失，请重新导出", error="导出文件已被移动或删除", retryable=True)
+        return _export_job_snapshot(job["job_id"])
+    return job
 
 
 def _update_export_job(job_id: str, **updates):
@@ -1164,8 +1240,9 @@ def _update_export_job(job_id: str, **updates):
         job = EXPORT_JOBS.get(job_id)
         if not job:
             return
-        job.update(updates)
-        job["updated_at"] = datetime.now().isoformat()
+        candidate = {**job, **updates, "updated_at": datetime.now().isoformat()}
+        _persist_export_job(candidate)
+        job.update(candidate)
 
 
 def _mark_task_exported(task_id: str, target: str) -> None:
@@ -1180,7 +1257,7 @@ def _safe_export_params(payload: Optional[dict]) -> dict:
     source = payload if isinstance(payload, dict) else {}
     return {
         key: source[key]
-        for key in ("draft_root", "target_os", "use_preview", "auto_download", "overwrite")
+        for key in ("draft_root", "target_os", "use_preview", "auto_download", "overwrite", "collision_policy", "open_output_directory")
         if key in source and isinstance(source[key], (str, bool))
     }
 
@@ -1200,10 +1277,12 @@ def _create_export_job(task_id: str, target: str, payload: Optional[dict] = None
         "error_meta": None,
         "cancel_requested": False,
         "params": _safe_export_params(payload),
+        "task_snapshot": {"task": mysql_client.get_task(task_id), "segments": mysql_client.get_segments(task_id)},
         "created_at": now,
         "updated_at": now,
     }
     with EXPORT_JOBS_LOCK:
+        _persist_export_job(job)
         EXPORT_JOBS[job_id] = job
     return job
 
@@ -1234,9 +1313,11 @@ def _create_or_reuse_export_job(task_id: str, target: str, payload: Optional[dic
             "error_meta": None,
             "cancel_requested": False,
             "params": _safe_export_params(payload),
+            "task_snapshot": {"task": mysql_client.get_task(task_id), "segments": mysql_client.get_segments(task_id)},
             "created_at": now,
             "updated_at": now,
         }
+        _persist_export_job(job)
         EXPORT_JOBS[job_id] = job
         return dict(job), True
 
@@ -1250,18 +1331,21 @@ def _active_export_jobs(task_id: str) -> List[dict]:
 
 
 def _latest_export_jobs(task_id: str) -> List[dict]:
+    _load_persisted_exports(task_id)
     with EXPORT_JOBS_LOCK:
         matching = [dict(job) for job in EXPORT_JOBS.values() if job.get("task_id") == task_id]
     latest = {}
     for job in sorted(matching, key=lambda item: item.get("created_at") or ""):
         latest[job.get("target")] = job
-    return list(latest.values())
+    return [_validate_completed_export(job) for job in latest.values()]
 
 
 def _export_cancel_requested(job_id: str) -> bool:
     with EXPORT_JOBS_LOCK:
         job = EXPORT_JOBS.get(job_id)
-        return bool(job and job.get("cancel_requested"))
+        cancelled = bool(job and job.get("cancel_requested"))
+        task_id = job.get("task_id") if job else None
+    return cancelled or bool(task_id and task_runtime.export_cancelled(task_id, job_id))
 
 
 def _raise_if_export_cancelled(job_id: str) -> None:
@@ -1269,17 +1353,35 @@ def _raise_if_export_cancelled(job_id: str) -> None:
         raise ExportJobCancelled("导出已取消")
 
 
+def _submit_export(job, use_preview, payload):
+    task_id, job_id = job["task_id"], job["job_id"]
+    token = task_runtime.register_export(task_id, job_id)
+    if token is None:
+        _update_export_job(job_id, status="cancelled", message="项目正在删除")
+        return
+    future = export_pool.submit(_run_export_job, job_id, job["target"], use_preview, payload)
+    def cancelled():
+        _update_export_job(job_id, status="cancelled", message="排队导出已取消", cancel_requested=True)
+        task_runtime.finish_export(task_id, job_id)
+    token.bind_future(future, cancelled)
+
+
 def _run_export_job(job_id: str, target: str, use_preview: bool, payload: Optional[dict] = None):
-    _update_export_job(job_id, status="processing", message="正在准备导出")
     job = _export_job_snapshot(job_id)
     task_id = job.get("task_id")
+    active = False
     try:
+        if task_runtime.register_export(task_id, job_id) is None:
+            raise ExportJobCancelled()
+        _raise_if_export_cancelled(job_id)
+        active = task_runtime.start_export(task_id, job_id)
+        if not active:
+            raise ExportJobCancelled()
+        _update_export_job(job_id, status="processing", message="正在准备导出", task_snapshot={"task": mysql_client.get_task(task_id), "segments": mysql_client.get_segments(task_id)})
         _raise_if_export_cancelled(job_id)
         task = task_manager.get_task(task_id)
         if not task:
             raise RuntimeError("任务不存在")
-        if target != "materials" and (not task.result or not task.result.draft_path):
-            raise RuntimeError("草稿路径不存在")
 
         segments = mysql_client.get_segments(task_id)
         if not segments:
@@ -1299,14 +1401,15 @@ def _run_export_job(job_id: str, target: str, use_preview: bool, payload: Option
             return material_result
 
         exporter = AutoExporter({
-            "mp4": lambda: _export_mp4(
+            "mp4": lambda: _render_with_limit(
                 task,
                 segments,
                 use_preview,
                 should_cancel=lambda: _export_cancel_requested(job_id),
+                on_stage=lambda message: _update_export_job(job_id, message=message),
             ),
             "draft": lambda: _export_draft(task, segments),
-            "draft_local": lambda: _export_draft_local(task, segments, payload or {}),
+            "draft_local": lambda: _export_draft_local(task, segments, payload or {}, should_cancel=lambda: _raise_if_export_cancelled(job_id)),
             "materials": export_materials,
         })
         result = exporter.export(
@@ -1339,6 +1442,22 @@ def _run_export_job(job_id: str, target: str, use_preview: bool, payload: Option
             error_meta=safe.metadata(),
         )
 
+    finally:
+        task_runtime.finish_export(task_id, job_id, active=active)
+
+
+def _render_with_limit(*args, **kwargs):
+    on_stage = kwargs.pop("on_stage", None)
+    if on_stage: on_stage("排队渲染")
+    while not render_slot.acquire(timeout=0.2):
+        if kwargs.get('should_cancel') and kwargs['should_cancel']():
+            raise ExportJobCancelled('排队渲染已取消')
+    try:
+        if on_stage: on_stage("正在渲染 MP4")
+        return _export_mp4(*args, **kwargs)
+    finally:
+        render_slot.release()
+
 
 def _export_mp4(
     task,
@@ -1361,6 +1480,12 @@ def _export_mp4(
 
     raise_if_cancelled()
 
+    def check_approval():
+        from .production_flow import approval_key
+        for flow in mysql_client.production_list(task_id=task.task_id, active=True):
+            if (flow['cancel_requested'] or approval_key(mysql_client.get_task(task.task_id), mysql_client.get_segments(task.task_id)) != flow['approval_key']):
+                raise ExportJobCancelled('预案已变化或生产已取消')
+    check_approval()
     if use_preview and preview["valid"]:
         manifest = preview["manifest"]
         preview_path = _workspace_resolve_file(manifest["video_path"])
@@ -1404,6 +1529,7 @@ def _export_mp4(
         current_segments = mysql_client.get_segments(task.task_id)
         if _media_fingerprint(task, current_segments) != snapshot_before:
             raise RuntimeError("渲染期间素材已变化，本次结果已作废，请重新生成")
+        check_approval()
         # Rendering is staged beside the final file. The existing usable MP4 is
         # only replaced after the complete render and snapshot checks succeed.
         if render_path is not None:
@@ -1415,7 +1541,7 @@ def _export_mp4(
 
     video_url = LocalUploader().upload(
         str(output_path),
-        f"{task.task_id}/exports/{output_path.stem}_{_ratio_slug(_task_ratio(task))}_{int(time.time())}.mp4",
+        f"{task.task_id}/exports/{output_path.stem}_{_ratio_slug(_task_ratio(task))}_{uuid.uuid4().hex}.mp4",
     )
     manifest = _write_preview_manifest(task, output_path, video_url, segments)
     _set_task_result_preserving(task, len(segments), video_url=video_url)
@@ -1431,7 +1557,7 @@ def _export_mp4(
 
 
 def _build_editable_draft(task, segments: List[dict]) -> Path:
-    from src.core.pipeline import VideoEditorPipeline
+    from src.draft.builder import DraftBuilder
 
     segment_texts = [seg.get("text") or "" for seg in segments]
     media_paths = [seg.get("image_path") for seg in segments]
@@ -1440,15 +1566,17 @@ def _build_editable_draft(task, segments: List[dict]) -> Path:
     if missing:
         raise RuntimeError("分镜图片文件不存在，无法导出剪映草稿")
 
-    draft_name = Path(task.result.draft_path).name
-    pipeline = VideoEditorPipeline(theme=task.theme, output_dir=task.result.draft_path, canvas=_task_canvas(task))
-    draft_path = pipeline.draft_builder.build(
+    draft_name = _safe_draft_name(getattr(task, "name", None) or task.theme, task.task_id)
+    destination = Config.BASE_DIR / "output" / task.task_id / ".exports" / uuid.uuid4().hex / draft_name
+    builder = DraftBuilder(canvas=_task_canvas(task),
+                                   subtitle_options=_task_subtitle_options(mysql_client.get_task(task.task_id)))
+    draft_path = builder.build(
         segments=segment_texts,
         media_paths=media_paths,
         draft_name=draft_name,
         voiceover_files=voiceover_files,
         animation_seed=_task_animation_seed(task.task_id),
-        output_dir=task.result.draft_path,
+        output_dir=str(destination),
     )
     return Path(draft_path)
 
@@ -1457,15 +1585,15 @@ def _export_draft(task, segments: List[dict]) -> dict:
     from src.utils.local_uploader import LocalUploader
 
     draft_path = _build_editable_draft(task, segments)
-    zip_path = _pack_draft_zip(task)
+    zip_path = _pack_draft_zip(task, draft_path)
     draft_url = LocalUploader().upload(
         str(zip_path),
-        f"{task.task_id}/exports/{zip_path.stem}_{_ratio_slug(_task_ratio(task))}_{int(time.time())}.zip",
+        f"{task.task_id}/exports/{zip_path.stem}_{_ratio_slug(_task_ratio(task))}_{uuid.uuid4().hex}.zip",
     )
-    _set_task_result_preserving(task, len(segments), draft_url=draft_url)
+    _set_task_result_preserving(task, len(segments), draft_url=draft_url, draft_path=draft_path)
     return {
         "target": "draft",
-        "draft_path": draft_path,
+        "draft_path": str(draft_path),
         "zip_path": str(zip_path),
         "draft_url": draft_url,
         "ratio": _task_ratio(task),
@@ -1473,48 +1601,34 @@ def _export_draft(task, segments: List[dict]) -> dict:
     }
 
 
-def _export_draft_local(task, segments: List[dict], payload: dict) -> dict:
-    draft_root = (payload or {}).get("draft_root") or (payload or {}).get("extract_path")
-    target_os = (payload or {}).get("target_os") or _server_target_os()
-    overwrite = bool((payload or {}).get("overwrite", True))
+def _export_draft_local(task, segments: List[dict], payload: dict, should_cancel=None) -> dict:
+    from src.export.draft_publication import publish_draft
+    draft_root = payload.get("draft_root") or payload.get("extract_path")
+    target_os = payload.get("target_os") or _server_target_os()
+    policy = payload.get("collision_policy")
+    if policy is None:
+        policy = ("backup_replace" if payload["overwrite"] else "error") if "overwrite" in payload else "copy"
     root_check = _validate_local_draft_root(draft_root, target_os)
     if not root_check["valid"]:
         raise RuntimeError("；".join(root_check["issues"] or ["剪映草稿目录不可用"]))
-
     source_draft = _build_editable_draft(task, segments)
-    draft_name = source_draft.name
-    draft_root_path = Path(root_check["path"])
-    target_draft = draft_root_path / draft_name
-
-    if target_draft.exists():
-        if not overwrite:
-            raise RuntimeError(f"剪映草稿已存在：{target_draft}")
-        shutil.rmtree(target_draft)
-
-    def _ignore_export_artifacts(_dir, names):
-        return {
-            name for name in names
-            if name == "previews" or name.endswith(".zip") or name.endswith(".mp4")
-        }
-
-    shutil.copytree(source_draft, target_draft, ignore=_ignore_export_artifacts)
-    _normalize_draft_files_for_location(target_draft, root_check["path"], draft_name, root_check["target_os"])
-    preflight = _draft_preflight(target_draft, root_check["target_os"])
-    if not preflight["valid"]:
-        raise RuntimeError("；".join(preflight["issues"]))
-
+    def prepare(staging, destination):
+        _normalize_draft_files_for_location(staging, str(destination.parent), destination.name, root_check["target_os"])
+    def verify(path):
+        result = _draft_preflight(path, root_check["target_os"])
+        if not result["valid"]:
+            raise RuntimeError("；".join(result["issues"]))
+    def check():
+        if should_cancel:
+            should_cancel()
+        if task_runtime.is_deleting(task.task_id):
+            raise ExportJobCancelled()
+    result = publish_draft(source_draft, root_check["path"], policy=policy, prepare=prepare, verify=verify, should_cancel=check)
     task_manager.update_extract_path(task.task_id, root_check["path"])
-
-    return {
-        "target": "draft_local",
-        "draft_root": root_check["path"],
-        "draft_path": str(target_draft),
-        "draft_name": draft_name,
-        "ratio": _task_ratio(task),
-        "canvas": _task_canvas(task),
-        "preflight": preflight,
-        "warnings": root_check["warnings"] + preflight["warnings"],
-    }
+    return {"target": "draft_local", "draft_root": root_check["path"], **result,
+            "ratio": _task_ratio(task), "canvas": _task_canvas(task),
+            "preflight": _draft_preflight(Path(result["draft_path"]), root_check["target_os"]),
+            "warnings": root_check["warnings"]}
 
 
 @router.get("/config")
@@ -1543,7 +1657,7 @@ def _readiness_item(
     }
 
 
-def _config_readiness(voice_type: Optional[str] = None) -> dict:
+def _config_readiness(voice_type: Optional[str] = None, phase: str = "full") -> dict:
     """Return secret-free local readiness for the providers this task will use."""
     config = Config.load_model_config()
     llm = config.get("llm") or {}
@@ -1665,6 +1779,7 @@ def _config_readiness(voice_type: Optional[str] = None) -> dict:
             ),
         ),
     ]
+    items = [item for item in items if phase == "full" or (phase == "planning" and item["key"] == "llm") or (phase == "assets" and item["key"] in {"image", "tts"})]
     statuses = {item["status"] for item in items}
     overall = (
         "not_ready" if "not_ready" in statuses
@@ -1679,14 +1794,18 @@ def _config_readiness(voice_type: Optional[str] = None) -> dict:
 
 
 @router.get("/config/readiness")
-async def get_config_readiness(voice_type: Optional[str] = Query(None)):
-    return _config_readiness(voice_type)
+async def get_config_readiness(voice_type: Optional[str] = Query(None), phase: str = Query("full", pattern="^(full|planning|assets)$")):
+    return _config_readiness(voice_type, phase)
 
 
 @router.put("/config")
 async def update_config(config: dict = Body(...)):
     """更新模型配置"""
-    return Config.save_model_config(config)
+    from src.config import ConfigConflict
+    try:
+        return await run_io(lambda: Config.save_model_config(config))
+    except ConfigConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.post("/config/test-tts")
@@ -1875,6 +1994,9 @@ async def update_voice_availability(payload: dict = Body(...)):
 
 @router.post("/voices/preview")
 async def preview_voice(payload: dict = Body(...)):
+    return await run_io(_preview_voice_sync, payload, preview=True)
+
+def _preview_voice_sync(payload):
     voice_type = str(payload.get("voice_type") or "").strip()
     if not voice_type:
         raise HTTPException(status_code=400, detail="请选择试听音色")
@@ -1946,7 +2068,7 @@ async def create_voice_clone(
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as staged:
             staged.write(content)
             temporary = Path(staged.name)
-        return _voice_clone_store().create(name, temporary, consent_confirmed)
+        return await run_io(lambda: _voice_clone_store().create(name, temporary, consent_confirmed))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
@@ -1976,7 +2098,7 @@ async def replace_voice_clone_reference(
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as staged:
             staged.write(content)
             temporary = Path(staged.name)
-        return _voice_clone_store().replace_reference(clone_id, temporary)
+        return await run_io(lambda: _voice_clone_store().replace_reference(clone_id, temporary))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
@@ -1992,7 +2114,7 @@ async def preview_voice_clone(clone_id: str, payload: dict = Body(default={})):
         raise HTTPException(status_code=404, detail="克隆音色不存在")
     text = str(payload.get("text") or Config.tts_config().get("preview_text") or "这是我的声音试听。")[:120]
     try:
-        preview = VoicePreviewService(
+        preview = await run_io(lambda: VoicePreviewService(
             base_dir=Config.BASE_DIR,
             tts_config=Config.tts_config(),
             clone_store=store,
@@ -2001,8 +2123,8 @@ async def preview_voice_clone(clone_id: str, payload: dict = Body(default={})):
             text,
             payload.get("tts_options") or {},
             config_override=payload.get("config_override"),
-        )
-        ready = store.mark_ready(clone_id, Path(preview["path"]))
+        ), preview=True)
+        ready = await run_io(lambda: store.mark_ready(clone_id, Path(preview["path"])))
         return {"clone": ready, "preview": preview}
     except Exception as exc:
         safe = classify_exception(exc, provider="mimo")
@@ -2031,13 +2153,13 @@ async def extract_document_text(file: UploadFile = File(...)):
     if suffix not in ALLOWED_DOCUMENT_EXTENSIONS:
         raise HTTPException(status_code=400, detail="只支持 TXT、Markdown、DOCX、PDF 文档")
 
-    content = await file.read()
+    content = await file.read(MAX_DOCUMENT_UPLOAD_BYTES + 1)
     if not content:
         raise HTTPException(status_code=400, detail="文档内容为空")
     if len(content) > MAX_DOCUMENT_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="文档不能超过 20MB")
 
-    text, document_type = _extract_uploaded_document_text(filename, content)
+    text, document_type = await run_io(_extract_uploaded_document_text, filename, content)
     normalized = _normalize_document_text(text)
     if not normalized:
         raise HTTPException(status_code=400, detail="未能从文档中提取到可用文字")
@@ -2180,6 +2302,11 @@ async def get_task_activity(limit: int = Query(10, ge=1, le=50)):
     }
 
 
+def _validate_template_length(values):
+    if 'length' in values and (type(values['length']) is not int or not 0 <= values['length'] <= 2000):
+        raise HTTPException(422, '主题目标字数须为 0–2000，0 表示自动')
+
+
 @router.get("/templates")
 async def list_production_templates():
     return {"items": mysql_client.list_production_templates()}
@@ -2191,6 +2318,7 @@ async def create_production_template(payload: dict = Body(...)):
     if not name:
         raise HTTPException(status_code=400, detail="模板名称不能为空")
     values = dict(payload)
+    _validate_template_length(values)
     values["name"] = name[:80]
     values["ratio"] = normalize_ratio(values.get("ratio") or "16:9")
     values["subtitle_options"] = _normalize_subtitle_options(values.get("subtitle_options"))
@@ -2204,6 +2332,7 @@ async def create_production_template(payload: dict = Body(...)):
 @router.patch("/templates/{template_id}")
 async def update_production_template(template_id: str, payload: dict = Body(...)):
     values = dict(payload)
+    _validate_template_length(values)
     if "name" in values and not str(values.get("name") or "").strip():
         raise HTTPException(status_code=400, detail="模板名称不能为空")
     if "name" in values:
@@ -2238,11 +2367,16 @@ async def create_task(request: CreateTaskRequest):
     - **voice_type**: TTS 音色 ID（可选）
     """
     input_mode = "theme" if request.input_mode == "theme" else "script"
-    theme_text = request.theme.strip()
+    theme_text = request.theme if input_mode == "script" else request.theme.strip()
+    if not theme_text.strip():
+        raise HTTPException(status_code=400, detail="文稿或主题不能为空")
     if input_mode == "theme" and len(theme_text) > 100:
         raise HTTPException(status_code=400, detail="主题模式最多输入 100 字")
 
-    voice_type = _resolve_new_task_voice(request.voice_type)
+    if request.execution_mode == "review_first":
+        voice_type = _resolve_new_task_voice(request.voice_type, validate=False)
+    else:
+        voice_type = _resolve_new_task_voice(request.voice_type)
     tts_options = _snapshot_tts_options(
         voice_type,
         _model_dict(request.tts_options, exclude_none=True),
@@ -2251,6 +2385,7 @@ async def create_task(request: CreateTaskRequest):
     # 创建任务
     task_id = task_manager.create_task(
         theme=theme_text,
+        input_mode=input_mode,
         name=request.name,
         style=request.style,
         length=request.length,
@@ -2317,8 +2452,15 @@ async def create_batch(request: CreateBatchRequest):
     normalized = []
     seen = set()
     for item in request.items:
-        theme = _clean_batch_theme(item.theme)
-        key = _normalize_batch_theme(theme)
+        raw = item.content if item.content is not None else item.theme
+        if not raw or not raw.strip():
+            raise HTTPException(status_code=400, detail="主题或文稿不能为空")
+        if item.content is not None and item.theme is not None and item.content != item.theme:
+            raise HTTPException(status_code=400, detail="content 与 theme 内容不一致")
+        theme = _clean_batch_theme(raw) if request.input_mode == "theme" else raw
+        if request.input_mode == "theme" and len(theme) > 100:
+            raise HTTPException(status_code=400, detail="主题最多 100 字；完整文稿请使用文稿模式")
+        key = _normalize_batch_theme(theme) if request.input_mode == "theme" else uuid.uuid4().hex
         if not key:
             raise HTTPException(status_code=400, detail="批量主题不能是空行")
         if key in seen:
@@ -2331,8 +2473,9 @@ async def create_batch(request: CreateBatchRequest):
             "normalized_theme": key,
         })
 
-    voice_type = _resolve_new_task_voice(request.voice_type)
+    voice_type = _resolve_new_task_voice(request.voice_type, validate=False)
     config = {
+        "input_mode": request.input_mode,
         "style": request.style,
         "ratio": normalize_ratio(request.ratio),
         "length": request.length,
@@ -2340,7 +2483,7 @@ async def create_batch(request: CreateBatchRequest):
         "tts_options": _snapshot_tts_options(
             voice_type, _model_dict(request.tts_options, exclude_none=True)
         ),
-        "script_policy": request.script_policy,
+        "script_policy": "verbatim" if request.input_mode == "script" else "rewrite",
         "template_id": request.template_id,
         "generation_options": _normalize_generation_options(
             _model_dict(request.generation_options, exclude_none=True)
@@ -2357,16 +2500,26 @@ async def create_batch(request: CreateBatchRequest):
 
 
 @router.get("/batches")
-async def list_batches(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
-    return {"items": mysql_client.list_batches(limit=limit, offset=offset)}
+async def list_batches(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0), archived: Optional[bool] = None):
+    return {"items": await run_query(mysql_client.list_batches, limit=limit, offset=offset, archived=archived)}
+
+@router.post('/batches/{batch_id}/archive')
+async def archive_batch(batch_id: str, archived: bool = Body(..., embed=True)):
+    batch = await run_query(mysql_client.set_batch_archived, batch_id, archived)
+    if not batch:
+        raise HTTPException(status_code=404, detail='批次不存在')
+    return batch
 
 
 @router.get("/batches/{batch_id}")
 async def get_batch(batch_id: str):
+    return await run_query(_get_batch_with_summary, batch_id)
+
+def _get_batch_with_summary(batch_id):
     batch = mysql_client.get_batch(batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="批次不存在")
-    return batch
+    return _batch_video_summary(batch)
 
 
 @router.post("/batches/{batch_id}/cancel")
@@ -2411,10 +2564,16 @@ async def create_task_from_images(
     if name and len(name) > 100:
         raise HTTPException(status_code=400, detail="项目名称最多 100 字")
 
+    total_bytes = 0
+    validated_images = []
     for file in images:
-        _validate_upload_image(file)
+        metadata = await run_io(_validate_upload_image, file)
+        validated_images.append(metadata)
+        total_bytes += metadata["file_size"]
+        if total_bytes > MAX_BATCH_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail="批量图片总量不能超过 100 MiB")
 
-    canonical_voice = _resolve_new_task_voice(voice_type)
+    canonical_voice = _resolve_new_task_voice(voice_type, validate=False)
     raw_options = _parse_options_json(tts_options)
     option_snapshot = _snapshot_tts_options(canonical_voice, raw_options)
 
@@ -2433,7 +2592,7 @@ async def create_task_from_images(
         from src.utils.local_uploader import LocalUploader
 
         draft_name = _safe_draft_name(name or theme, task_id)
-        draft_path = Path("output") / draft_name
+        draft_path = Config.BASE_DIR / "output" / task_id / draft_name
         images_dir = draft_path / "images"
         images_dir.mkdir(parents=True, exist_ok=True)
 
@@ -2441,11 +2600,9 @@ async def create_task_from_images(
         segments_data = []
 
         for index, file in enumerate(images):
-            suffix = Path(file.filename or "").suffix.lower()
-            if suffix not in ALLOWED_IMAGE_EXTENSIONS:
-                suffix = ".jpg"
+            suffix = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}[validated_images[index]["format"]]
 
-            local_filename = f"seg_{index:03d}_upload{suffix}"
+            local_filename = f"seg_{index:03d}_{uuid.uuid4().hex}{suffix}"
             local_path = images_dir / local_filename
 
             with open(local_path, "wb") as f:
@@ -2478,11 +2635,13 @@ async def create_task_from_images(
             raise RuntimeError("保存段落数据失败")
 
         task_manager.set_task_result(task_id, str(draft_path), len(segments_data))
-        task_manager.update_task_status(task_id, TaskStatus.COMPLETED)
+        mysql_client.update_task_workflow(task_id, "awaiting_confirmation", status="awaiting_confirmation")
+        mysql_client.save_task_checkpoint(task_id, execution_mode="review_first", voice_confirmed=0, input_mode="images")
+        task_manager.invalidate_task_cache(task_id)
 
         return CreateTaskResponse(
             task_id=task_id,
-            status=TaskStatus.COMPLETED
+            status=TaskStatus.AWAITING_CONFIRMATION
         )
     except HTTPException:
         task_manager.set_task_error(task_id, "上传图片创建任务失败")
@@ -2604,19 +2763,22 @@ def _workspace_file_ready(path: Optional[str]) -> bool:
     return _workspace_resolve_file(path) is not None
 
 
+def _production_state_for_ui(flow):
+    if flow and flow['state'] == 'rendering' and flow.get('job_id'):
+        job = _export_job_snapshot(flow['job_id'])
+        if job.get('status') == 'pending' or (job.get('status') == 'processing' and job.get('message') in ('正在准备导出', '排队渲染')):
+            return {**flow, 'state':'render_queued'}
+    return flow
+
+
 def _workspace_script(task_row: dict, segments: List[dict]) -> tuple[str, str]:
-    stored = str(task_row.get("script_text") or "").strip()
-    if stored:
-        return stored, str(task_row.get("script_source") or "stored")
-    recovered = "\n".join(
-        str(segment.get("text") or "").strip()
-        for segment in sorted(
-            segments,
-            key=lambda item: int(item.get("segment_index") or 0),
-        )
-        if str(segment.get("text") or "").strip()
-    )
-    return recovered, "reconstructed_segments" if recovered else "missing"
+    if task_row.get("input_mode_known") == 1 and task_row.get("script_text") is not None:
+        return task_row["script_text"], str(task_row.get("script_source") or "stored")
+    if segments and (task_row.get("workflow_phase") != "planning" or not task_row.get("script_text")):
+        return "\n".join(str(segment.get("text") or "") for segment in sorted(
+            segments, key=lambda item: int(item.get("segment_index") or 0))), "current_segments" if task_row.get("script_text") else "reconstructed_segments"
+    stored = str(task_row.get("script_text") or "")
+    return stored, str(task_row.get("script_source") or "stored") if stored else "missing"
 
 
 def _workspace_draft_ready(task_row: dict) -> bool:
@@ -2624,7 +2786,8 @@ def _workspace_draft_ready(task_row: dict) -> bool:
     draft_path = result.get("draft_path")
     if not draft_path:
         return False
-    return _workspace_resolve_directory(draft_path) is not None
+    directory = _workspace_resolve_directory(draft_path)
+    return bool(directory and any((directory / name).is_file() for name in ("draft_info.json", "draft_content.json")))
 
 
 def _workspace_output_dir(task, segments: List[dict]) -> Path:
@@ -2650,7 +2813,28 @@ def _workspace_output_dir(task, segments: List[dict]) -> Path:
     return Config.BASE_DIR / "output" / task.task_id / _safe_draft_name(name, task.task_id)
 
 
+def _project_media_write(function):
+    from functools import wraps
+    @wraps(function)
+    async def guarded(*args, **kwargs):
+        task_id = kwargs.get("task_id") or (args[0] if args else None)
+        token = task_runtime.begin(task_id)
+        if token is None:
+            raise HTTPException(status_code=409, detail="项目正在处理其他操作，请稍后重试")
+        try:
+            token.raise_if_cancelled()
+            return await function(*args, **kwargs)
+        finally:
+            task_runtime.finish(task_id, token)
+    return guarded
+
+
 def _ensure_workspace_mutable(task_row: dict) -> None:
+    task_id = task_row.get("task_id")
+    if task_runtime.is_deleting(task_id) or task_row.get("status") == "deleting":
+        raise HTTPException(status_code=409, detail="项目正在删除")
+    if task_runtime.has_exports(task_id):
+        raise HTTPException(status_code=409, detail="项目正在导出，请等待或取消导出后再修改")
     if task_row.get("status") == TaskStatus.PROCESSING.value:
         raise HTTPException(status_code=409, detail="任务正在生成，请等待当前阶段完成后再修改")
 
@@ -2795,7 +2979,7 @@ def _reconcile_workspace_state(task_row: dict, segments: List[dict]) -> dict:
     error = None
 
     if status == TaskStatus.COMPLETED.value and not (
-        health["plan_complete"] and health["assets_complete"] and health["draft_ready"]
+        health["plan_complete"] and health["assets_complete"] and (health["draft_ready"] or any(f["state"] == "completed" for f in mysql_client.production_list(task_id=task_id)))
     ):
         next_status = TaskStatus.INTERRUPTED.value
         if not health["plan_complete"]:
@@ -2833,7 +3017,7 @@ def _reconcile_workspace_state(task_row: dict, segments: List[dict]) -> dict:
         next_phase = "generating_assets"
         next_step = "asset_repair"
         error = "检测到素材不完整，请先修复缺失素材"
-    elif status == TaskStatus.AWAITING_CONFIRMATION.value and not health["plan_complete"]:
+    elif status == TaskStatus.AWAITING_CONFIRMATION.value and not health["plan_complete"] and task_row.get("input_mode") != "images":
         next_status = TaskStatus.INTERRUPTED.value
         next_phase = "planning"
         next_step = "image_prompt_generation" if segments else "text_generation"
@@ -3078,6 +3262,9 @@ def _workspace_segment_payload(
 
 @router.get("/tasks/{task_id}/workspace")
 async def get_task_workspace(task_id: str, request: Request):
+    return await run_query(_get_task_workspace_sync, task_id, request)
+
+def _get_task_workspace_sync(task_id, request):
     """Return the complete persisted state needed by the production workspace."""
     task_row = mysql_client.get_task(task_id)
     if not task_row:
@@ -3179,9 +3366,13 @@ async def get_task_workspace(task_id: str, request: Request):
         "status": task_row.get("status"),
         "stage": stage,
         "planning_step": planning_step,
+        "production": _production_state_for_ui((mysql_client.production_list(task_id=task_id) or [None])[-1]),
         "execution_mode": task_row.get("execution_mode") or "full",
         "input_mode": task_row.get("input_mode") or "script",
+        "original_input": task_row.get("original_input") or task_row.get("theme") or "",
+        "input_mode_required": task_row.get("input_mode_known") == 0 and not task_row.get("script_text") and not segments,
         "script_text": script_text,
+        "can_restore_plan": mysql_client.has_plan_revision(task_id),
         "script_source": script_source,
         "summary": task_row.get("summary") or "",
         "text_style": parts[0] if parts else "知识科普",
@@ -3230,7 +3421,7 @@ async def get_task_workspace(task_id: str, request: Request):
                 and _workspace_file_ready(segment.get("audio_path"))
                 for segment in segments
             ),
-            "full_video": bool(health["assets_complete"] and health["draft_ready"]),
+            "full_video": bool(health["assets_complete"]),
             "enter_export": bool(health["images_ready"] or health["audio_ready"]),
             "material_export": bool(health["images_ready"] or health["audio_ready"]),
             "retry_failed_assets": bool(
@@ -3404,6 +3595,9 @@ async def generate_task_workspace_assets(task_id: str, response: Response, paylo
     snapshot_key = payload.get("snapshot_key") or ""
     if snapshot_key != _plan_fingerprint(task_row, segments):
         raise HTTPException(status_code=409, detail="预案已发生变化，请确认最新内容后再生成")
+    readiness = _config_readiness(task_row.get("voice_type"), "assets")
+    if readiness["status"] == "not_ready":
+        raise HTTPException(status_code=409, detail={"code": "config_not_ready", "message": "图片或配音配置不完整，预案已保留", "items": readiness["items"]})
     outcome = task_executor.continue_task(task_id)
     if outcome in {"started", "already_running"}:
         response.status_code = 202 if outcome == "started" else 200
@@ -3738,8 +3932,10 @@ async def resegment_task_workspace(task_id: str, payload: dict = Body(...)):
     if not task_row:
         raise HTTPException(status_code=404, detail="任务不存在")
     _ensure_workspace_mutable(task_row)
-    script_text = str(payload.get("script_text") or "").strip()
-    if not script_text:
+    script_text = str(payload.get("script_text") or "")
+    if len(script_text) > 5000:
+        raise HTTPException(422, "完整文稿最多 5000 字")
+    if not script_text.strip():
         raise HTTPException(status_code=400, detail="完整文案不能为空")
     segments = TextSegmenter().split(script_text)
     if not segments:
@@ -3775,6 +3971,21 @@ async def resegment_task_workspace(task_id: str, payload: dict = Body(...)):
     task_manager.invalidate_task_cache(task_id)
     outcome = task_executor.resume_task(task_id)
     return {"message": "已开始重新拆分提示词", "plan_version": next_version, "outcome": outcome}
+
+
+@router.post("/tasks/{task_id}/plan/restore")
+async def restore_task_plan(task_id: str, payload: dict = Body(...)):
+    row = mysql_client.get_task(task_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    _ensure_workspace_mutable(row)
+    version = mysql_client.restore_plan_revision(task_id, payload.get("expected_plan_version"))
+    if version == -1:
+        raise HTTPException(status_code=409, detail="预案已变更，请刷新后重试")
+    if version is None:
+        raise HTTPException(status_code=404, detail="没有可恢复的拆分前版本")
+    task_manager.invalidate_task_cache(task_id)
+    return {"task_id": task_id, "plan_version": version}
 
 
 @router.post("/tasks/{task_id}/resume")
@@ -3886,6 +4097,7 @@ async def delete_task(
 
 
 @router.get("/tasks/{task_id}/download")
+@_project_media_write
 async def download_task(
     task_id: str,
     extract_path: Optional[str] = Query(None, description="用户解压路径，如 D:\\JianyingPro Drafts；留空则按浏览器下载原草稿包"),
@@ -3899,6 +4111,10 @@ async def download_task(
 
     返回浏览器可下载的草稿包，包内包含以草稿名命名的根文件夹。
     """
+    return await run_io(_download_draft_bundle, task_id, extract_path, target_os)
+
+
+def _download_draft_bundle(task_id, extract_path, target_os):
     task = task_manager.get_task(task_id)
 
     if not task:
@@ -4016,6 +4232,34 @@ async def download_video(task_id: str):
     )
 
 
+@router.get("/project-catalog")
+async def get_project_catalog(page: int = Query(1, ge=1), limit: int = Query(40, ge=1, le=100),
+                              q: str = Query("", max_length=200), status: str = Query("all"),
+                              style: str = Query(""), duration: str = Query(""), sort: str = Query("updated")):
+    result = await run_query(mysql_client.project_catalog, page=page, limit=limit, q=q, status=status, style=style, duration=duration, sort=sort)
+    for item in result["items"]:
+        if task_runtime.is_queued(item["task_id"]):
+            item["display_label"] = "排队中"
+        cover = item.get("cover_image_url") or ""
+        if cover and not cover.startswith(("http://", "https://", "/media/")):
+            item["cover_image_url"] = f"/ai/native/video/kepu/tasks/{item['task_id']}/cover"
+    return result
+
+
+@router.get("/tasks/{task_id}/cover")
+async def get_project_cover(task_id: str):
+    segments = mysql_client.get_segments(task_id)
+    for segment in sorted(segments, key=lambda row: row["segment_index"]):
+        path = _workspace_resolve_file(segment.get("image_path"))
+        if path:
+            try:
+                await run_io(validate_asset_file, path, "image")
+                return FileResponse(str(path))
+            except ValueError:
+                continue
+    raise HTTPException(status_code=404, detail="暂无封面")
+
+
 @router.get("/tasks", response_model=List[dict])
 async def list_tasks(
     request: Request,
@@ -4089,10 +4333,21 @@ async def get_task_render_config(task_id: str):
 
 
 @router.post("/tasks/{task_id}/preview-render")
-async def render_task_preview(
-    task_id: str,
-    segment_index: Optional[int] = Query(None, ge=0, description="只渲染指定分镜；不传则渲染全片")
-):
+async def render_task_preview(task_id: str, segment_index: Optional[int] = Query(None, ge=0)):
+    job_id = uuid.uuid4().hex
+    if task_runtime.register_export(task_id, job_id) is None:
+        raise HTTPException(status_code=409, detail="项目正在删除")
+    active = False
+    try:
+        active = await run_io(task_runtime.start_export, task_id, job_id)
+        if not active:
+            raise HTTPException(status_code=409, detail="预览已取消")
+        return await run_io(_render_legacy_preview, task_id, segment_index, job_id)
+    finally:
+        task_runtime.finish_export(task_id, job_id, active=active)
+
+
+def _render_legacy_preview(task_id, segment_index, job_id):
     """使用最终 FFmpeg 链路生成精准预览 MP4。"""
     task = task_manager.get_task(task_id)
     if not task:
@@ -4115,13 +4370,13 @@ async def render_task_preview(
         selected = segments
         animation_params = all_animation_params
         ratio_slug = _task_ratio(task).replace(":", "x")
-        filename = f"preview_full_{ratio_slug}_{int(time.time())}.mp4"
+        filename = f"preview_full_{ratio_slug}_{uuid.uuid4().hex}.mp4"
         mode = "full"
     else:
         selected = [segments[segment_index]]
         animation_params = [all_animation_params[segment_index]]
         ratio_slug = _task_ratio(task).replace(":", "x")
-        filename = f"preview_seg_{segment_index:03d}_{ratio_slug}_{int(time.time())}.mp4"
+        filename = f"preview_seg_{segment_index:03d}_{ratio_slug}_{uuid.uuid4().hex}.mp4"
         mode = "segment"
 
     segment_texts = [seg.get("text") or "" for seg in selected]
@@ -4140,14 +4395,20 @@ async def render_task_preview(
         canvas=_task_canvas(task),
         subtitle_options=_task_subtitle_options(mysql_client.get_task(task_id)),
     )
-    exporter.export(
+    def check_cancel():
+        return task_runtime.export_cancelled(task_id, job_id)
+    if check_cancel():
+        raise ExportJobCancelled()
+    with render_slot:
+        exporter.export(
+        should_cancel=check_cancel,
         segments=segment_texts,
         media_paths=media_paths,
         voiceover_files=voiceover_files,
         output_path=str(video_path),
         animation_seed=seed,
         animation_params=animation_params,
-    )
+        )
 
     preview_url = LocalUploader().upload(str(video_path), f"{task_id}/previews/{filename}")
     manifest = None
@@ -4177,7 +4438,7 @@ async def get_export_state(task_id: str, request: Request):
     has_draft_path = bool(task.result and task.result.draft_path)
     draft_zip = _draft_zip_path(task) if has_draft_path else None
     video_path = _official_video_path(task) if has_draft_path else None
-    materials = material_package_state(
+    materials = await run_query(material_package_state,
         task_id,
         getattr(task, "name", None) or getattr(task, "theme", None) or task_id,
         segments,
@@ -4255,7 +4516,7 @@ async def select_local_draft_folder(task_id: str):
     task = task_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    folder = _pick_local_folder()
+    folder = await run_io(lambda: _pick_local_folder())
     if not folder:
         raise HTTPException(status_code=400, detail="未选择文件夹")
     return _validate_local_draft_root(folder, _server_target_os())
@@ -4283,8 +4544,8 @@ async def create_export(task_id: str, payload: dict = Body(...)):
     use_preview = bool((payload or {}).get("use_preview", True))
     if target not in {"mp4", "draft", "draft_local", "materials"}:
         raise HTTPException(status_code=400, detail="target 必须是 mp4、draft、draft_local 或 materials")
-    if target != "materials" and (not task.result or not task.result.draft_path):
-        raise HTTPException(status_code=404, detail="草稿路径不存在")
+    if target != "materials" and not _workspace_health(mysql_client.get_task(task_id), mysql_client.get_segments(task_id))["assets_complete"]:
+        raise HTTPException(status_code=409, detail="图片和配音尚未齐全，已有素材已保留")
 
     if target == "materials":
         segments = mysql_client.get_segments(task_id)
@@ -4308,8 +4569,10 @@ async def create_export(task_id: str, payload: dict = Body(...)):
 
     job, created = _create_or_reuse_export_job(task_id, target, payload)
     if created:
-        thread = Thread(target=_run_export_job, args=(job["job_id"], target, use_preview, payload), daemon=True)
-        thread.start()
+        if task_runtime.register_export(task_id, job["job_id"]) is None:
+            _update_export_job(job["job_id"], status="cancelled", message="项目正在删除")
+            raise HTTPException(status_code=409, detail="项目正在删除")
+        _submit_export(job, use_preview, payload)
     return job
 
 
@@ -4318,7 +4581,22 @@ async def get_export_job(task_id: str, job_id: str):
     job = _export_job_snapshot(job_id)
     if not job or job.get("task_id") != task_id:
         raise HTTPException(status_code=404, detail="导出任务不存在")
-    return job
+    return _validate_completed_export(job)
+
+
+@router.post("/tasks/{task_id}/exports/{job_id}/reveal")
+async def reveal_export_directory(task_id: str, job_id: str, payload: Optional[dict] = Body(None)):
+    from src.export.auto_export import open_output_directory
+    job = _export_job_snapshot(job_id)
+    if not job or job.get("task_id") != task_id:
+        raise HTTPException(status_code=404, detail="导出记录不存在")
+    result = job.get("result") or {}
+    key = "backup_path" if (payload or {}).get("backup") else "draft_path"
+    path = result.get(key)
+    if not path or not Path(path).is_dir():
+        raise HTTPException(status_code=404, detail="目录已不存在")
+    await run_io(open_output_directory, Path(path))
+    return {"opened": True}
 
 
 @router.post("/tasks/{task_id}/exports/{job_id}/cancel")
@@ -4333,7 +4611,9 @@ async def cancel_export_job(task_id: str, job_id: str):
         job["cancel_requested"] = True
         job["message"] = "正在取消；已开始的片段会安全收尾"
         job["updated_at"] = datetime.now().isoformat()
-        return dict(job)
+        _persist_export_job(job)
+    task_runtime.cancel_export(task_id, job_id)
+    return _export_job_snapshot(job_id)
 
 
 @router.get("/tasks/{task_id}/download-materials", name="download_material_package")
@@ -4432,6 +4712,7 @@ async def get_task_asset_library(
 
 
 @router.post("/tasks/{task_id}/segments/{segment_index}/select-asset")
+@_project_media_write
 async def select_segment_asset(
     task_id: str,
     segment_index: int,
@@ -4443,7 +4724,7 @@ async def select_segment_asset(
         raise HTTPException(status_code=404, detail="任务不存在")
     task_row = mysql_client.get_task(task_id) or {}
     _ensure_workspace_mutable(task_row)
-    if mysql_client.get_active_task_operation(task_id) or task_runtime.is_running(task_id):
+    if mysql_client.get_active_task_operation(task_id):
         raise HTTPException(status_code=409, detail="当前已有项目操作正在执行")
     segments = mysql_client.get_segments(task_id)
     segment = next(
@@ -4481,6 +4762,11 @@ async def select_segment_asset(
                     "target_text": segment.get("text") or "",
                 },
             )
+    try:
+        media_metadata = await run_io(validate_asset_file, _workspace_resolve_file(asset.get("path")), asset_type)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    asset = {**asset, **media_metadata, "tts_options": _parse_options_json(asset.get("snapshot_json")).get("tts_options", {})}
     selected_asset = asset
     source_segment_index = asset.get("segment_index")
     if source_segment_index is None or int(source_segment_index) != int(segment_index):
@@ -4502,6 +4788,7 @@ async def select_segment_asset(
         )
         if not selected_asset:
             raise HTTPException(status_code=500, detail="素材复用版本保存失败")
+    selected_asset = {**selected_asset, **media_metadata, "tts_options": asset.get("tts_options", {})}
     success = mysql_client.select_segment_asset(
         task_id,
         segment_index,
@@ -4561,6 +4848,7 @@ async def download_task_subtitle_vtt(task_id: str):
     return await _download_task_subtitle(task_id, "vtt")
 
 
+@_project_media_write
 async def _download_task_subtitle(task_id: str, format: str):
     task = task_manager.get_task(task_id)
     if not task:
@@ -4568,7 +4856,7 @@ async def _download_task_subtitle(task_id: str, format: str):
     if not task.result or not task.result.draft_path:
         raise HTTPException(status_code=404, detail="草稿路径不存在")
     segments = mysql_client.get_segments(task_id)
-    subtitle_path = _write_task_subtitle(task, segments, format)
+    subtitle_path = await run_io(_write_task_subtitle, task, segments, format)
     format_label = format.upper()
     _record_asset(
         task_id,
@@ -4586,6 +4874,7 @@ async def _download_task_subtitle(task_id: str, format: str):
 
 
 @router.get("/tasks/{task_id}/assets/download")
+@_project_media_write
 async def download_task_assets(
     task_id: str,
     type: str = Query("all", description="all/image/audio/subtitle/upload"),
@@ -4602,15 +4891,27 @@ async def download_task_assets(
     if not assets:
         raise HTTPException(status_code=404, detail="没有可下载的素材")
 
+    return await run_io(_download_assets_bundle, task, assets)
+
+
+def _download_assets_bundle(task, assets):
+    task_id = task.task_id
     folder_map = {"image": "images", "audio": "audio", "subtitle": "subtitles"}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         added = 0
         used_names = set()
         used_paths = set()
+        skipped = []
         for asset in assets:
             path = _workspace_resolve_file(asset.get("path"))
             if path is None:
+                skipped.append({"asset_id": asset.get("asset_id"), "reason": "素材文件不存在"})
+                continue
+            try:
+                validate_asset_file(path, asset.get("asset_type"))
+            except ValueError as error:
+                skipped.append({"asset_id": asset.get("asset_id"), "reason": str(error)})
                 continue
             path_key = str(path.resolve())
             if path_key in used_paths:
@@ -4625,6 +4926,8 @@ async def download_task_assets(
             used_names.add(arcname)
             zf.write(path, arcname)
             added += 1
+        if skipped:
+            zf.writestr("未包含素材说明.json", json.dumps(skipped, ensure_ascii=False, indent=2))
         if added == 0:
             raise HTTPException(status_code=404, detail="素材文件不存在")
 
@@ -4652,6 +4955,10 @@ async def download_task_asset_file(task_id: str, asset_id: str):
     path = _workspace_resolve_file(asset.get("path"))
     if path is None:
         raise HTTPException(status_code=404, detail="素材文件不存在")
+    try:
+        await run_io(validate_asset_file, path, asset.get("asset_type"))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     media_type = {
         ".jpg": "image/jpeg",
         ".jpeg": "image/jpeg",
@@ -4678,6 +4985,7 @@ async def select_segment_image(task_id: str, segment_index: int, request: Reques
 
 
 @router.put("/tasks/{task_id}/segments/{segment_index}")
+@_project_media_write
 async def update_segment(
     task_id: str,
     segment_index: int,
@@ -4725,6 +5033,10 @@ async def update_segment(
             updates['prompt_manual'] = 1
             updates['prompt_needs_review'] = 0
     if image_path is not None:
+        try:
+            await run_io(validate_asset_file, _workspace_resolve_file(image_path) or image_path, "image")
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
         updates['image_path'] = image_path
     if image_url is not None:
         updates['image_url'] = image_url
@@ -4881,6 +5193,7 @@ async def regenerate_audio(
     )
 
 @router.post("/tasks/{task_id}/segments/{segment_index}/upload-image")
+@_project_media_write
 async def upload_image(task_id: str, segment_index: int, file: UploadFile = File(...)):
     """
     上传自定义图片
@@ -4904,7 +5217,7 @@ async def upload_image(task_id: str, segment_index: int, file: UploadFile = File
 
     task_row = mysql_client.get_task(task_id) or {}
     _ensure_workspace_mutable(task_row)
-    if mysql_client.get_active_task_operation(task_id) or task_runtime.is_running(task_id):
+    if mysql_client.get_active_task_operation(task_id):
         raise HTTPException(status_code=409, detail="当前已有项目操作正在执行")
     segments = mysql_client.get_segments(task_id)
     segment = next(
@@ -4915,10 +5228,7 @@ async def upload_image(task_id: str, segment_index: int, file: UploadFile = File
         logger.error(f"[{task_id}] 分镜不存在: {segment_index}")
         raise HTTPException(status_code=404, detail="段落不存在")
 
-    # 验证文件类型
-    allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/webp"]
-    if file.content_type not in allowed_types:
-        raise HTTPException(status_code=400, detail="只支持 JPG、PNG、WEBP 格式的图片")
+    image_metadata = await run_io(_validate_upload_image, file)
 
     # 保存到本地临时文件
     draft_path = _workspace_output_dir(task, segments)
@@ -4926,8 +5236,8 @@ async def upload_image(task_id: str, segment_index: int, file: UploadFile = File
     images_dir.mkdir(parents=True, exist_ok=True)
 
     import time
-    timestamp = int(time.time())
-    file_ext = Path(file.filename).suffix or ".jpg"
+    timestamp = uuid.uuid4().hex
+    file_ext = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}[image_metadata["format"]]
     local_filename = f"seg_{segment_index:03d}_upload_{timestamp}{file_ext}"
     local_path = images_dir / local_filename
 
@@ -5033,3 +5343,111 @@ async def rebuild_draft(task_id: str, response: Response):
             "force": True,
         },
     )
+
+@router.post('/tasks/{task_id}/confirm-production')
+async def confirm_video_production(task_id: str, payload: dict = Body(...)):
+    from .production_flow import confirm
+    return await run_query(confirm, task_id, payload)
+
+
+@router.post('/tasks/{task_id}/cancel-production')
+async def cancel_video_production(task_id: str):
+    from .production_flow import cancel
+    return await run_query(cancel, task_id)
+
+
+@router.post('/batches/{batch_id}/confirm-production')
+async def confirm_batch_production(batch_id: str, payload: dict = Body(...)):
+    from .production_flow import confirm
+    batch = mysql_client.get_batch(batch_id)
+    if not batch:
+        raise HTTPException(404, '批次不存在')
+    allowed = {i['task_id'] for i in batch['items'] if i.get('task_id')}
+    selections = payload.get('items')
+    if not isinstance(selections, list) or not 1 <= len(selections) <= 50:
+        raise HTTPException(400, '请选择 1–50 个项目')
+    results=[];seen=set()
+    for selection in selections:
+        task_id=selection.get('task_id') if isinstance(selection, dict) else None
+        if task_id in seen:continue
+        seen.add(task_id)
+        if task_id not in allowed:
+            results.append({'task_id':task_id,'outcome':'error','error':'项目不属于本批次'});continue
+        try:results.append(await run_query(confirm,task_id,selection))
+        except HTTPException as error:
+            results.append({'task_id':task_id,'outcome':'conflict' if error.status_code==409 else 'error','error':error.detail})
+    return {'items':results}
+
+
+@router.post('/batches/{batch_id}/cancel-production')
+async def cancel_batch_production(batch_id: str):
+    from .production_flow import cancel
+    batch=mysql_client.get_batch(batch_id)
+    if not batch:raise HTTPException(404,'批次不存在')
+    return {'items':[cancel(i['task_id']) for i in batch['items'] if i.get('task_id')]}
+
+
+@router.patch('/tasks/{task_id}/input-mode')
+async def resolve_historical_input_mode(task_id: str, payload: dict = Body(...)):
+    row=mysql_client.get_task(task_id)
+    if not row:raise HTTPException(404,'项目不存在')
+    if row.get('status') not in ('failed','interrupted') or row.get('script_text') or task_runtime.is_running(task_id):
+        raise HTTPException(409,'当前不能更改原始输入模式')
+    mode=payload.get('input_mode')
+    if mode not in ('theme','script'):raise HTTPException(400,'请选择主题或脚本模式')
+    mysql_client.save_task_checkpoint(task_id,input_mode=mode,input_mode_known=1)
+    return {'input_mode':mode}
+
+
+def _batch_video_summary(batch):
+    from .production_flow import approval_key
+    flows=mysql_client.production_list(batch_id=batch['batch_id'])
+    latest={f['task_id']:f for f in flows}
+    running = queued = provider_wait = 0
+    counts={k:0 for k in ('queued','generating_assets','render_queued','rendering','completed','failed','cancelled','stale','cancelling')}
+    for item in batch['items']:
+        tid=item.get('task_id');row=mysql_client.get_task(tid) if tid else None
+        item['input_mode']=(batch.get('config') or {}).get('input_mode','theme')
+        item['can_produce']=False
+        item['unavailable_reason']='预案尚未就绪'
+        if not row:
+            queued += item['status'] == 'queued'
+            item['unavailable_reason']='项目已删除' if tid else '等待创建项目'
+            continue
+        generation_state = task_runtime.generation_state(tid)
+        item['generation_state'] = generation_state
+        running += generation_state in ('running', 'provider_wait')
+        queued += generation_state == 'queued' or (item['status'] == 'queued' and generation_state == 'idle')
+        provider_wait += generation_state == 'provider_wait'
+        segments=mysql_client.get_segments(tid)
+        flow=_production_state_for_ui(latest.get(tid))
+        if flow and flow['state'] == 'completed':
+            if flow['approval_key'] != approval_key(row, segments):
+                flow = {**flow, 'state':'stale', 'error':'预案已变化，请重新确认'}
+            elif not _preview_state(task_manager.get_task(tid), segments)['valid']:
+                flow = {**flow, 'state':'failed', 'error':'视频文件缺失或已过期，请重新生成'}
+        item.update(project_status=row['status'],segments_count=len(segments),plan_version=row.get('plan_version',0),
+                    snapshot_key=_plan_fingerprint(row,segments),production=flow)
+        if flow:counts[flow['state']]=counts.get(flow['state'],0)+1
+        if flow and flow['state'] in ('queued','generating_assets','render_queued','rendering','cancelling','completed'):
+            item['unavailable_reason']='视频已完成' if flow['state']=='completed' else '已加入成片生产'
+        elif task_runtime.is_running(tid):item['unavailable_reason']='项目正在生成'
+        elif segments and row.get('status') != 'deleting' and all(s.get('image_prompt') and s.get('prompt_status') not in ('failed','processing') for s in segments):
+            if _workspace_health(row, segments)['assets_complete']:
+                item['can_produce'] = True
+                item['unavailable_reason'] = None
+            else:
+                ready=_config_readiness(row.get('voice_type'),'assets')
+                item['can_produce']=ready['status']!='not_ready'
+                item['unavailable_reason']=None if item['can_produce'] else '图片或配音配置不完整'
+                if item['can_produce']:
+                    try: _resolve_new_task_voice(row.get('voice_type'))
+                    except HTTPException as error:
+                        item['can_produce'] = False
+                        item['unavailable_reason'] = error.detail if isinstance(error.detail, str) else '当前音色不可用'
+        item['text_excerpt']=(row.get('script_text') or item['theme'])[:160]
+    batch['runtime_counts']={'running':running,'queued':queued + counts['queued'],'provider_wait':provider_wait}
+    batch['production_counts']=counts
+    batch['generation_limit']=10
+    batch['render_limit']=1
+    return batch

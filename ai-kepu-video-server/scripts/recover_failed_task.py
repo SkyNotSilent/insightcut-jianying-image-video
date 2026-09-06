@@ -75,7 +75,7 @@ def scan_output_directory(output_dir: Path) -> dict:
     # 扫描图片
     images_dir = output_dir / 'images'
     if images_dir.exists():
-        for img_file in sorted(images_dir.glob('*.png')):
+        for img_file in sorted(p for p in images_dir.iterdir() if p.suffix.lower() in {'.png', '.jpg', '.jpeg', '.webp'}):
             files['images'].append(img_file)
 
     # 扫描音频
@@ -109,6 +109,11 @@ def recover_task_data(task_id: str, db_path: Path, output_base: Path, log_file: 
 
     # 2. 查找输出目录
     output_dir = output_base / task_name
+    owned = output_base / task_id
+    if owned.is_dir():
+        candidates = [p for p in owned.iterdir() if p.is_dir() and not p.name.startswith(".")]
+        if len(candidates) == 1:
+            output_dir = candidates[0]
     if not output_dir.exists():
         print(f"❌ 输出目录不存在: {output_dir}")
         conn.close()
@@ -132,22 +137,33 @@ def recover_task_data(task_id: str, db_path: Path, output_base: Path, log_file: 
     print(f"📝 从日志提取段落: {len(segments_from_log)} 个")
 
     # 5. 合并数据：以文件为准，日志为辅
-    segment_count = max(len(files['images']), len(files['audios']))
+    def by_segment(paths):
+        grouped = {}
+        for fallback, path in enumerate(paths):
+            match = re.search(r"(?:segment|seg|audio|voiceover|voice)_(\d+)", path.stem)
+            index = int(match.group(1)) if match else fallback
+            if index not in grouped or path.stat().st_mtime_ns > grouped[index].stat().st_mtime_ns:
+                grouped[index] = path
+        return grouped
+    images_by_segment = by_segment(files['images'])
+    audio_by_segment = by_segment(files['audios'])
     segments_data = []
+    relative_dir = output_dir.relative_to(output_base).as_posix()
 
-    for i in range(segment_count):
+    for i in sorted(set(images_by_segment) | set(audio_by_segment)):
+
         # 获取日志中的文本和 prompt
         log_segment = next((s for s in segments_from_log if s['index'] == i), {})
         text = log_segment.get('text', f'段落 {i + 1}')
         image_prompt = log_segment.get('image_prompt', '')
 
         # 图片信息
-        image_path = str(files['images'][i]) if i < len(files['images']) else None
-        image_url = f"/media/{task_name}/images/{files['images'][i].name}" if image_path else None
+        image_path = str(images_by_segment[i]) if i in images_by_segment else None
+        image_url = f"/media/{relative_dir}/images/{images_by_segment[i].name}" if image_path else None
 
         # 音频信息
-        audio_path = str(files['audios'][i]) if i < len(files['audios']) else None
-        audio_url = f"/media/{task_name}/voiceovers/{files['audios'][i].name}" if audio_path else None
+        audio_path = str(audio_by_segment[i]) if i in audio_by_segment else None
+        audio_url = f"/media/{relative_dir}/voiceovers/{audio_by_segment[i].name}" if audio_path else None
 
         # 计算音频时长
         duration = None
@@ -171,12 +187,21 @@ def recover_task_data(task_id: str, db_path: Path, output_base: Path, log_file: 
     # 6. 保存到数据库
     print(f"\n💾 开始保存数据...")
 
+    cursor.execute("BEGIN IMMEDIATE")
     # 6.1 保存段落数据
     for seg in segments_data:
         cursor.execute("""
-            INSERT OR REPLACE INTO task_segments
+            INSERT INTO task_segments
             (task_id, segment_index, text, image_prompt, image_path, image_url, audio_path, audio_url, duration)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(task_id,segment_index) DO UPDATE SET
+                text=COALESCE(NULLIF(task_segments.text,''),excluded.text),
+                image_prompt=COALESCE(NULLIF(task_segments.image_prompt,''),excluded.image_prompt),
+                image_path=COALESCE(NULLIF(task_segments.image_path,''),excluded.image_path),
+                image_url=COALESCE(NULLIF(task_segments.image_url,''),excluded.image_url),
+                audio_path=COALESCE(NULLIF(task_segments.audio_path,''),excluded.audio_path),
+                audio_url=COALESCE(NULLIF(task_segments.audio_url,''),excluded.audio_url),
+                duration=COALESCE(task_segments.duration,excluded.duration)
         """, (
             task_id,
             seg['segment_index'],
@@ -197,10 +222,10 @@ def recover_task_data(task_id: str, db_path: Path, output_base: Path, log_file: 
         i = seg['segment_index']
 
         # 保存图片资产
-        if seg['image_path']:
+        if seg['image_path'] and not cursor.execute("SELECT 1 FROM task_assets WHERE task_id=? AND segment_index=? AND asset_type='image' AND path=?", (task_id,i,seg['image_path'])).fetchone():
             asset_id = uuid.uuid4().hex
             cursor.execute("""
-                INSERT OR REPLACE INTO task_assets
+                INSERT OR IGNORE INTO task_assets
                 (asset_id, task_id, segment_index, asset_type, source, path, url, label, prompt, text, status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
@@ -219,10 +244,10 @@ def recover_task_data(task_id: str, db_path: Path, output_base: Path, log_file: 
             asset_count += 1
 
         # 保存音频资产
-        if seg['audio_path']:
+        if seg['audio_path'] and not cursor.execute("SELECT 1 FROM task_assets WHERE task_id=? AND segment_index=? AND asset_type='audio' AND path=?", (task_id,i,seg['audio_path'])).fetchone():
             asset_id = uuid.uuid4().hex
             cursor.execute("""
-                INSERT OR REPLACE INTO task_assets
+                INSERT OR IGNORE INTO task_assets
                 (asset_id, task_id, segment_index, asset_type, source, path, url, label, text, voice_type, status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (

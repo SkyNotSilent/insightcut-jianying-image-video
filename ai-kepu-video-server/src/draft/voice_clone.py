@@ -60,11 +60,12 @@ class VoiceCloneStore:
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=15,
             )
             payload = json.loads(completed.stdout or "{}")
             streams = payload.get("streams") or []
             duration = float((payload.get("format") or {}).get("duration") or 0)
-        except (subprocess.CalledProcessError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        except (subprocess.SubprocessError, ValueError, TypeError, json.JSONDecodeError) as exc:
             raise ValueError("参考音频无法解析") from exc
         if not streams or duration <= 0:
             raise ValueError("参考音频没有有效音轨")
@@ -87,6 +88,7 @@ class VoiceCloneStore:
                 ],
                 check=True,
                 capture_output=True,
+                timeout=120,
             )
             metadata = self._probe(temporary)
             encoded_size = len(base64.b64encode(temporary.read_bytes()))
@@ -95,7 +97,7 @@ class VoiceCloneStore:
             temporary.replace(destination)
             metadata["file_size"] = destination.stat().st_size
             return metadata
-        except subprocess.CalledProcessError as exc:
+        except subprocess.SubprocessError as exc:
             raise ValueError("参考音频无法解析") from exc
         finally:
             if temporary.exists():
@@ -177,6 +179,8 @@ class VoiceCloneStore:
         record = self.get(clone_id)
         if not record:
             raise ValueError("克隆音色不存在")
+        if self.db.is_voice_clone_referenced(clone_id):
+            return self.create(record["name"] + "（新录音）", upload_path, bool(record.get("consent_confirmed")))
         target = self._clone_root(clone_id) / "reference.wav"
         metadata = self._normalize(Path(upload_path), target)
         preview = self._clone_root(clone_id) / "preview.wav"
@@ -197,7 +201,9 @@ class VoiceCloneStore:
         return self._decorate(updated)
 
     def update(self, clone_id: str, patch: Dict) -> Dict:
-        allowed = {key: value for key, value in (patch or {}).items() if key in {"name", "is_enabled", "status"}}
+        if "status" in (patch or {}):
+            raise ValueError("音色状态只能在试听完成后更新")
+        allowed = {key: value for key, value in (patch or {}).items() if key in {"name", "is_enabled"}}
         if "name" in allowed:
             allowed["name"] = str(allowed["name"] or "").strip()[:80]
             if not allowed["name"]:
