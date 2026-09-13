@@ -16,7 +16,7 @@
     <img src="https://img.shields.io/badge/Python-3.11-315FEA?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.11" />
     <img src="https://img.shields.io/badge/React-19-315FEA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" />
     <img src="https://img.shields.io/badge/Local--first-SQLite-D46F44?style=flat-square" alt="Local first" />
-    <img src="https://img.shields.io/badge/License-not%20declared-68748B?style=flat-square" alt="No open-source license declared" />
+    <img src="https://img.shields.io/badge/License-MIT-315FEA?style=flat-square" alt="MIT License" />
   </p>
   <p>
     <a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>Showcase</strong></a>
@@ -151,8 +151,8 @@ Unlike a typical one-click generator, InsightCut treats each run as a project th
 ### Requirements
 
 - Python 3.11
-- Node.js and npm
-- FFmpeg; the installed <code>imageio-ffmpeg</code> package can provide a bundled binary
+- Node.js 22 and npm
+- System FFmpeg and ffprobe; Poppler (pdftotext) for PDF extraction. imageio-ffmpeg does not include ffprobe.
 
 ### 1. Clone
 
@@ -306,6 +306,7 @@ Backend:
 ~~~bash
 cd ai-kepu-video-server
 source venv311/bin/activate
+python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ~~~
 
@@ -355,4 +356,4 @@ Multi-user collaboration, cloud billing, multi-tenant accounts, a hosted templat
 
 ## License
 
-The repository does not currently declare an open-source license. Until one is added, treat it as source-available.
+Licensed under [MIT](LICENSE). See [Contributing](CONTRIBUTING.md) and [Security](SECURITY.md). Third-party dependencies, trademarks and non-owned media retain their own terms.
