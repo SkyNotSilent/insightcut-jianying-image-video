@@ -16,7 +16,7 @@
     <img src="https://img.shields.io/badge/Python-3.11-315FEA?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.11" />
     <img src="https://img.shields.io/badge/React-19-315FEA?style=flat-square&amp;logo=react&amp;logoColor=white" alt="React 19" />
     <img src="https://img.shields.io/badge/Local--first-SQLite-D46F44?style=flat-square" alt="本地优先" />
-    <img src="https://img.shields.io/badge/License-not%20declared-68748B?style=flat-square" alt="尚未声明开源许可证" />
+    <img src="https://img.shields.io/badge/License-MIT-315FEA?style=flat-square" alt="MIT License" />
   </p>
   <p>
     <a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>成片案例</strong></a>
@@ -160,7 +160,7 @@ https://github.com/user-attachments/assets/e4695fbc-2339-4102-b631-bcf61df63264
 
 ### 1. 准备环境
 
-当前后端需要 Python 3.11（CI 使用 3.11），前端使用 React 19、React Router 7 和 Vite 8。还需要 Node.js 20.19+、npm，以及可用的 FFmpeg；项目安装的 `imageio-ffmpeg` 可以提供内置二进制，系统 PATH 中已有 FFmpeg 时会优先使用系统版本。
+当前后端需要 Python 3.11（CI 使用 3.11），前端使用 React 19、React Router 7 和 Vite 8。还需要 Node.js 22、npm，以及系统 PATH 中的 FFmpeg 和 ffprobe；PDF 提取还需要 Poppler 的 pdftotext。imageio-ffmpeg 不提供 ffprobe。开发和测试环境安装见贡献指南。
 
 ```bash
 git clone https://github.com/SkyNotSilent/insightcut-jianying-image-video.git
@@ -224,7 +224,7 @@ npm run dev
 
 ### 6. 把结果写入剪映
 
-剪映草稿和 MP4 是两份独立的交付结果。生产任务会先完成文案、分镜、图片和配音，接着构建一份可迁移的剪映草稿并打包成 ZIP，最后再用 FFmpeg 合成 MP4。所以“写入剪映”不是把已经合成的 MP4 重新导入，也不会再调用模型；它只是把现有图片、配音、字幕和时间轴安装到本机剪映的草稿目录。
+剪映草稿和 MP4 是两份独立的交付结果。用户确认预案后会连续生成图片、配音和 MP4；剪映草稿只在请求导出时构建、打包或写入本机目录。所以“写入剪映”不是把已经合成的 MP4 重新导入，也不会再调用模型；它只是把现有图片、配音、字幕和时间轴安装到本机剪映的草稿目录。
 
 推荐在任务完成后进入导出页：
 
@@ -337,6 +337,7 @@ insightcut-jianying-image-video/
 ```bash
 cd ai-kepu-video-server
 source venv311/bin/activate
+python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
@@ -344,7 +345,7 @@ python -m pytest -q
 
 ```bash
 cd ai-kepu-video-web/frontend
-npm test
+npm run test:all
 npm run build
 ```
 
@@ -390,7 +391,7 @@ InsightCut 仍是一个持续迭代的、本地优先的单用户产品原型。
 
 ## License
 
-项目目前尚未声明开源许可证。在新增许可证前，请将本仓库视为 source-available 项目。
+项目目前MIT License。在新增许可证前，请将本仓库视为 source-available 项目。
 
 
 ## 批量预案与自动成片

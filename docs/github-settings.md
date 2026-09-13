@@ -58,12 +58,13 @@ Protect `master` with:
 - Require a pull request before merging.
 - Require status checks to pass before merging.
 - Required checks:
-  - `Backend compile`
-  - `Frontend build`
+  - `Backend tests and audit`
+  - `Frontend tests, build and audit`
   - `Repository hygiene`
+  - `Real full-stack Playwright`
 - Block force pushes.
 - Block branch deletion.
-- Keep administrator bypass enabled only for emergency recovery.
+- Apply protection to administrators; require resolved discussions. Single-maintainer PRs do not require a second approver; external PRs need maintainer review.
 
 ## PR Policy
 
@@ -75,7 +76,7 @@ Protect `master` with:
 
 ## Release Policy
 
-- Tag stable local-first batches as `v0.1.x`.
+- Distinguish master updates from explicitly requested versioned releases.
 - Release notes should include:
   - Product changes.
   - Engineering changes.

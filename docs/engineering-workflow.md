@@ -40,7 +40,7 @@ python -m compileall src api_server.py
 cd ../ai-kepu-video-web/frontend
 npm run build
 
-cd ../../..
+cd ../..
 python3 scripts/check_readme_assets.py
 ```
 
@@ -49,7 +49,7 @@ For generation pipeline changes, also validate that failed or partially failed t
 ## Release Rhythm
 
 - Merge only PRs that keep the local app runnable.
-- Tag stable batches as `v0.1.x`.
+- A master update is not a versioned release. Create a version tag only for an explicitly requested version release.
 - Release notes should include new behavior, fixes, validation, screenshots/videos, and known limitations.
 
 ## GitHub Settings
@@ -60,4 +60,6 @@ Protect `master` after this workflow lands:
 - Require CI checks to pass.
 - Block force pushes.
 - Block deletion of `master`.
-- Allow administrator bypass only for emergency recovery.
+- Apply branch protection to administrators. Do not bypass PRs or CI.
+
+For external Fork setup, development dependencies and full validation commands, follow [CONTRIBUTING.md](../CONTRIBUTING.md).

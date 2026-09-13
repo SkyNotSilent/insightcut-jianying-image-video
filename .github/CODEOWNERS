@@ -1,0 +1,6 @@
+# Automatically request the maintainer; independent approval is not required for owner PRs.
+/.github/ @SkyNotSilent
+/ai-kepu-video-server/src/database/ @SkyNotSilent
+/ai-kepu-video-server/src/utils/draft_publisher.py @SkyNotSilent
+/scripts/ @SkyNotSilent
+/LICENSE @SkyNotSilent
