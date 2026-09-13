@@ -131,7 +131,7 @@ jobs:
         run: python scripts/verify_local_flow.py
       - name: Preserve failure diagnostics and media summary
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: full-stack-evidence
           retention-days: 7
@@ -266,13 +266,13 @@ jobs:
           npx playwright test --config=playwright.site.config.js
       - name: Preserve website screenshots and failure traces
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: website-evidence
           retention-days: 7
           path: ai-kepu-video-web/frontend/test-results-site/
       - name: Save verified site for publication
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pages-site
           retention-days: 7
