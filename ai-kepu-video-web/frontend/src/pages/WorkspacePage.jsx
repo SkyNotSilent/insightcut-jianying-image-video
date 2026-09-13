@@ -442,7 +442,7 @@ export function WorkspacePage() {
       }
     })
     return () => { active = false }
-  }, [taskId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [taskId])
 
   useEffect(() => {
     const jobId = workspace?.production?.job_id

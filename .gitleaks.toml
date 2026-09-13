@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Explicit synthetic test credentials (no blanket source exclusions)"
+regexTarget = "secret"
+regexes = ['''^sk-live-DETAIL-MARKER-1234$''', '''^sk-legacy-sensitive-0123456789$''']

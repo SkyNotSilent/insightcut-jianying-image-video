@@ -34,7 +34,7 @@
 在 `ai-kepu-video-server` 中创建虚拟环境后运行：
 
 ```sh
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.lock
 ffmpeg -version
 ffprobe -version
 pdftotext -v
@@ -61,7 +61,7 @@ npx playwright install chromium
 | ai-kepu-video-web/frontend | `npm run test:all`，`npm run build`，`npm run test:e2e` |
 | ai-kepu-video-web/frontend | `npx playwright test --config=playwright.fullstack.config.js` |
 
-全栈使用隔离数据库、假供应商和实际 PNG/WAV/FFmpeg。不要指向自己的数据库，不要传真实 API Key。测试配置中的独立端口不可被其他测试占用；若使用旧版测试配置，先停止 2001/2002 的开发服务。真实供应商音画质量和剪映客户端打开需单独注明是否验收。
+全栈默认用 2101/2102，普通浏览器用 2103；可用 INSIGHTCUT_E2E_WEB_PORT / INSIGHTCUT_E2E_API_PORT 和 INSIGHTCUT_BROWSER_PORT 覆盖。全栈使用隔离数据库、假供应商和实际 PNG/WAV/FFmpeg。不要指向自己的数据库，不要传真实 API Key。测试配置中的独立端口不可被其他测试占用；若使用旧版测试配置，先停止 2001/2002 的开发服务。真实供应商音画质量和剪映客户端打开需单独注明是否验收。
 
 UI 修改附桌面/手机截图；产物变化附压缩后的视频或结构验证结果。失败与取消必须保留已有内容，迁移注明备份和回退方法。
 

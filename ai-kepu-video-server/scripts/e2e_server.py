@@ -26,4 +26,6 @@ ImageGenerator.generate=image;VoiceOverGenerator.generate=voice
 Config.save_model_config({'image':{'api_key':'local-fixture'},'tts':{'provider':'mimo','mimo':{'api_key':'local-fixture'}}})
 from api_server import app
 import uvicorn
-uvicorn.run(app,host='127.0.0.1',port=2002)
+from starlette.middleware.cors import CORSMiddleware
+app.add_middleware(CORSMiddleware, allow_origins=[f"http://127.0.0.1:{os.environ.get('INSIGHTCUT_E2E_WEB_PORT', '2101')}"], allow_methods=['*'], allow_headers=['*'])
+uvicorn.run(app,host='127.0.0.1',port=int(os.environ.get('INSIGHTCUT_E2E_API_PORT', '2102')))

@@ -202,11 +202,6 @@ export function ProjectAssetsPage() {
 
   const removeTaskFromView = taskId => {
     setRemoteTasks(current => current.filter(task => task.task_id !== taskId))
-    setTaskSegments(current => {
-      const next = { ...current }
-      delete next[taskId]
-      return next
-    })
     setFallbackCovers(current => {
       const next = { ...current }
       delete next[taskId]

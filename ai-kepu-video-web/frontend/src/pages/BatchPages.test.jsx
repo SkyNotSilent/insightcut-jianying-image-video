@@ -106,7 +106,10 @@ describe('batch planning pages', () => {
       items: running.items.map(item => ({ ...item, status: 'cancelled' })),
     }
     taskApi.getBatch.mockResolvedValue(running)
-    taskApi.cancelBatch.mockResolvedValue(cancelled)
+    taskApi.cancelBatch.mockImplementation(async () => {
+      taskApi.getBatch.mockResolvedValue(cancelled)
+      return cancelled
+    })
     const user = userEvent.setup()
     render(<MemoryRouter initialEntries={['/batches/batch-1']}><Routes><Route path="/batches/:batchId" element={<BatchDetailPage />} /></Routes></MemoryRouter>)
 

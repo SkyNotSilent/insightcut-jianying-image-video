@@ -151,3 +151,9 @@ npm run dev
   - 统一使用 `LocalUploader` 复制到 `data/media/`
   - 不再支持 OSS/COS 上传、`USE_REMOTE_DB` 切换、MySQL/Redis 远程模式
   - 数据固定使用本地 SQLite：`ai-kepu-video-server/data/local.db`
+
+## 贡献验证
+
+- 开发/CI 安装后端 requirements-dev.lock（含哈希），更新锁使用 uv pip compile requirements-dev.txt --python-version 3.11 --universal --generate-hashes --output-file requirements-dev.lock。
+- 日常前后端端口仍为 2001/2002；隔离全栈测试默认 2101/2102，浏览器测试 2103，不复用开发服务。
+- 运行 ruff check src api_server.py、npm run lint、scripts/check_contribution.py；完整产物验证运行 scripts/verify_local_flow.py。
