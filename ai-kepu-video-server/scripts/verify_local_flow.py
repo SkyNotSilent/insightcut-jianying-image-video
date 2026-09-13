@@ -79,7 +79,9 @@ for target in ['materials','mp4','draft','draft_local','draft_local','draft_loca
  if target=='draft_local':local_results.append(j['result'])
  if target=='mp4':
   actual=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_format','-show_streams','-of','json',j['result']['video_path']]))
-  assert float(actual['format']['duration'])>0
+  assert abs(float(actual['format']['duration'])-1.0)<0.25, actual['format']
+  video_stream=next(st for st in actual['streams'] if st['codec_type']=='video')
+  assert (video_stream['width'],video_stream['height'])==(1920,1080)
   assert {st['codec_type'] for st in actual['streams']} >= {'video','audio'}
 assert Path(local_results[1]['draft_path']).name.endswith('（2）')
 assert Path(local_results[2]['backup_path']).is_dir()
@@ -105,3 +107,8 @@ print('TASK_ID',tid,flush=True)
 (ROOT/'flow-result.json').write_text(json.dumps({'task_id':tid,'workspace':w,'export_state':state},ensure_ascii=False,indent=2))
 
 print("VERIFIED_RUNTIME", ROOT, flush=True)
+
+summary=os.environ.get('INSIGHTCUT_FLOW_SUMMARY')
+if summary:
+ Path(summary).parent.mkdir(parents=True,exist_ok=True)
+ Path(summary).write_text(json.dumps({'status':'passed','targets':['mp4','srt','vtt','materials','assets_zip','draft','draft_local_copy','draft_backup_replace'],'duration':float(actual['format']['duration']),'dimensions':[video_stream['width'],video_stream['height']],'audio':True},indent=2))

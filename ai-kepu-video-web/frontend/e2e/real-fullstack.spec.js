@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-const apiBaseUrl = 'http://127.0.0.1:2002/ai/native/video/kepu'
+const apiBaseUrl = `http://127.0.0.1:${process.env.INSIGHTCUT_E2E_API_PORT || '2102'}/ai/native/video/kepu`
 
 async function readBatch(request, batchId) {
   const response = await request.get(`${apiBaseUrl}/batches/${batchId}`)
@@ -128,6 +128,9 @@ test('single-project confirmation automatically produces a playable video withou
  await expect(page.getByLabel('完整视频预览',{exact:true})).toBeVisible({timeout:60000})
  const state=await (await page.request.get(`${apiBaseUrl}/tasks/${task_id}/export-state`)).json()
  expect(state.preview.valid).toBeTruthy();expect(state.outputs.draft.available).toBeFalsy()
+ const video=page.getByLabel('完整视频预览',{exact:true})
+ await video.evaluate(el=>{el.muted=true;return el.play()})
+ await expect.poll(()=>video.evaluate(el=>el.currentTime)).toBeGreaterThan(0.1)
 })
 
 test('batch composer and preview remain usable on a narrow phone',async({page})=>{

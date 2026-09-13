@@ -45,3 +45,10 @@ Thumbs.db
 
 # Verified Python 3.11 replacement environment; retain venv/ for rollback.
 venv311/
+
+# Isolated CI and browser evidence
+.ci-platform/
+ci-evidence/
+test-results-browser/
+test-results-fullstack/
+playwright-report/
