@@ -52,3 +52,6 @@ ci-evidence/
 test-results-browser/
 test-results-fullstack/
 playwright-report/
+site-dist/
+site-test-dist/
+test-results-site/

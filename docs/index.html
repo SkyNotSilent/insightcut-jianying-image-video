@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>InsightCut · 让想法，有画面</title>
+    <meta
+      name="description"
+      content="本地优先、可编辑、可恢复的 AI 图片视频工作台。从主题或完整文稿出发，生成分镜、图片、配音、字幕和 MP4，按需导出剪映草稿。MIT 开源。"
+    />
+    <meta name="theme-color" content="#315FEA" />
+    <meta property="og:title" content="InsightCut · 让想法，有画面" />
+    <meta
+      property="og:description"
+      content="从一句主题到一条视频。每段文字、每幅画面，都留给你继续创作。"
+    />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="assets/insightcut-mark.svg" />
+    <link rel="stylesheet" href="assets/site.css" />
+    <script src="assets/site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到正文</a>
+    <header class="site-header wrap">
+      <a class="brand" href="./" aria-label="InsightCut 首页"
+        ><img
+          src="assets/insightcut-mark.svg"
+          width="40"
+          height="40"
+          alt=""
+        /><span>InsightCut<span class="brand-dot">.</span></span></a
+      >
+      <nav aria-label="主导航">
+        <a href="#work">作品</a><a href="#studio">工作台</a
+        ><a href="guide.html">文档</a
+        ><a
+          class="nav-github"
+          href="https://github.com/SkyNotSilent/insightcut-jianying-image-video"
+          >GitHub <span aria-hidden="true">↗</span></a
+        >
+      </nav>
+    </header>
+    <main id="main">
+      <section class="hero wrap" aria-labelledby="hero-title">
+        <div class="hero-topline">
+          <span class="eyebrow"
+            ><span class="status-dot"></span>你的本地 AI 视频工作台</span
+          ><span class="edition">OPEN SOURCE / MIT</span>
+        </div>
+        <div class="hero-copy">
+          <h1 id="hero-title">
+            让想法，<br /><span
+              >有画面<span class="orange-period">。</span></span
+            >
+          </h1>
+          <div class="hero-description">
+            <p>
+              一句主题，一篇文稿。<br />从分镜、画面到配音和成片，<br />把创作连起来，把选择留给你。
+            </p>
+            <div class="actions">
+              <a class="button primary" href="#start"
+                >开始创作 <span aria-hidden="true">↗</span></a
+              ><a class="text-link" href="#work"
+                >先看真实作品 <span aria-hidden="true">↓</span></a
+              >
+            </div>
+            <p class="small-note">
+              本机运行 · 素材可编辑 · 剪映 / CapCut 草稿导出
+            </p>
+          </div>
+        </div>
+        <figure class="studio-window">
+          <div class="window-bar">
+            <span class="window-dots" aria-hidden="true"
+              ><i></i><i></i><i></i></span
+            ><span>INSIGHTCUT STUDIO</span
+            ><span class="window-local">LOCAL WORKSPACE</span>
+          </div>
+          <img
+            src="screenshots/workspace.png"
+            width="2940"
+            height="1618"
+            alt="InsightCut 工作台真实截图：左侧分镜列表，中间毛毡风画面预览，右侧画面和配音设置"
+            fetchpriority="high"
+          />
+          <figcaption>
+            <span><b>01 —</b> 从想法到作品，始终在你的工作台里。</span
+            ><span>实际产品界面</span>
+          </figcaption>
+        </figure>
+        <div class="hero-foot">
+          <span>为科普、故事与知识表达而做</span
+          ><span>文字 → 分镜 → 画面与声音 → 视频</span>
+        </div>
+      </section>
+
+      <section id="work" class="work-section section-pad">
+        <div class="wrap">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">MADE WITH INSIGHTCUT</p>
+              <h2>先看作品，<br />再聊可能。</h2>
+            </div>
+            <p>来自真实本地任务的成片。<br />按下播放，听见文字，看到想法。</p>
+          </div>
+          <div class="film-grid">
+            <article class="film">
+              <div class="film-player">
+                <video
+                  controls
+                  playsinline
+                  preload="none"
+                  poster="showcase/thumbs/who-am-i-16x9.jpg"
+                  src="showcase/videos/who-am-i-16x9.mp4"
+                  aria-label="播放：我是谁，我在哪，我要去何方"
+                ></video
+                ><span class="film-index" aria-hidden="true">01</span>
+              </div>
+              <div class="film-meta">
+                <span>一句主题 / 毛毡风 / 16:9</span>
+                <h3>我是谁？我在哪？<br />我要去何方？</h3>
+                <p>从 14 字的提问，展开一段温暖的自我对话。</p>
+              </div>
+            </article>
+            <article class="film">
+              <div class="film-player">
+                <video
+                  controls
+                  playsinline
+                  preload="none"
+                  poster="showcase/thumbs/book-16x9.jpg"
+                  src="showcase/videos/book-16x9.mp4"
+                  aria-label="播放：小岛经济学"
+                ></video
+                ><span class="film-index" aria-hidden="true">02</span>
+              </div>
+              <div class="film-meta">
+                <span>完整文稿 / 毛毡风 / 16:9</span>
+                <h3>小岛经济学</h3>
+                <p>保留原文，用画面把抽象的知识慢慢讲清楚。</p>
+              </div>
+            </article>
+            <article class="film">
+              <div class="film-player">
+                <video
+                  controls
+                  playsinline
+                  preload="none"
+                  poster="showcase/thumbs/thirty-years-16x9.jpg"
+                  src="showcase/videos/thirty-years-16x9.mp4"
+                  aria-label="播放：三十年河东，三十年河西"
+                ></video
+                ><span class="film-index" aria-hidden="true">03</span>
+              </div>
+              <div class="film-meta">
+                <span>一句主题 / 插画风 / 16:9</span>
+                <h3>三十年河东，<br />三十年河西。</h3>
+                <p>用一段熟悉的话，开启一个新的故事。</p>
+              </div>
+            </article>
+          </div>
+          <a class="text-link gallery-link" href="showcase/"
+            >进入完整展厅，看看竖屏与更多风格
+            <span aria-hidden="true">↗</span></a
+          >
+        </div>
+      </section>
+
+      <section id="studio" class="studio-section wrap section-pad">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">YOUR IDEAS. YOUR EDIT.</p>
+            <h2>生成只是开始。<br />创作一直由你掌握。</h2>
+          </div>
+          <p>
+            每段文字、每个分镜都能继续调整。<br />保留过程，也保留灵感改变的余地。
+          </p>
+        </div>
+        <div class="feature-row">
+          <div class="feature-copy">
+            <span class="step-number">01 / 构思</span>
+            <h3>从一句话出发，<br />或带上你的全文。</h3>
+            <p>
+              主题模式帮你展开想法；完整文稿模式保留原文。批量预案支持每批 2–50
+              个项目，先看方案，再确认生产。
+            </p>
+            <a class="text-link" href="batch-video-workflow.html"
+              >了解批量预案 <span aria-hidden="true">↗</span></a
+            >
+          </div>
+          <a
+            class="feature-image"
+            href="screenshots/manuscript.png"
+            aria-label="查看完整文稿页截图"
+            ><img
+              src="screenshots/manuscript.png"
+              width="2940"
+              height="1618"
+              alt="文稿页：选择主题或脚本，输入正文并设置生成参数"
+              loading="lazy"
+          /></a>
+        </div>
+        <div class="feature-row reversed">
+          <div class="feature-copy">
+            <span class="step-number">02 / 打磨</span>
+            <h3>改一处细节，<br />不用从头来过。</h3>
+            <p>
+              文稿、提示词、图片和配音独立管理。可以换一张图、重配一段声音，也可以在中断后，接着已有素材继续做。
+            </p>
+            <a class="text-link" href="reliability-remediation.html"
+              >了解保存与恢复 <span aria-hidden="true">↗</span></a
+            >
+          </div>
+          <a
+            class="feature-image"
+            href="screenshots/assets.png"
+            aria-label="查看完整项目资产页截图"
+            ><img
+              src="screenshots/assets.png"
+              width="2940"
+              height="1618"
+              alt="项目资产页：保留各项目的素材、预案和生成进度"
+              loading="lazy"
+          /></a>
+        </div>
+        <div class="export-note">
+          <div class="export-symbol" aria-hidden="true">↗</div>
+          <div>
+            <span class="step-number">03 / 交付</span>
+            <h3>成片可以带走，工程也可以。</h3>
+            <p>
+              确认后连续生成图片、配音和
+              MP4。按需下载视频、字幕与素材包，或导出剪映 / CapCut
+              草稿继续精修。
+            </p>
+          </div>
+          <span class="format-label">MP4<br />SRT / VTT<br />剪映草稿</span>
+        </div>
+      </section>
+
+      <section class="principles section-pad">
+        <div class="wrap principles-inner">
+          <div>
+            <p class="eyebrow">A LITTLE MORE CONTROL</p>
+            <h2>你的创作，<br />留在你的工作空间。</h2>
+          </div>
+          <div class="principle-list">
+            <div>
+              <span>01</span>
+              <div>
+                <h3>本地优先</h3>
+                <p>
+                  项目数据库、媒体与导出文件保存在本机。生成时使用你配置的模型服务商。
+                </p>
+              </div>
+            </div>
+            <div>
+              <span>02</span>
+              <div>
+                <h3>参数属于这个项目</h3>
+                <p>
+                  应用预案模板时保存参数快照。模板可以共用，单条与批量的当前设置各自独立。
+                </p>
+              </div>
+            </div>
+            <div>
+              <span>03</span>
+              <div>
+                <h3>开放，也欢迎一起改进</h3>
+                <p>
+                  MIT
+                  许可证。代码、文档与贡献流程公开，欢迎带着具体问题和想法加入。
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="start" class="start-section wrap section-pad">
+        <div class="start-heading">
+          <p class="eyebrow">MAKE ROOM FOR YOUR NEXT IDEA</p>
+          <h2>下一条，<span>从你开始。</span></h2>
+          <p>在自己的电脑上启动 InsightCut，配置模型服务商，就能开始创作。</p>
+        </div>
+        <div class="start-grid">
+          <div class="install-panel">
+            <div class="install-top">
+              <span>获取源码</span
+              ><button type="button" id="copy-command">
+                复制命令 <span aria-hidden="true">⧉</span>
+              </button>
+            </div>
+            <pre><code id="clone-command">git clone https://github.com/SkyNotSilent/insightcut-jianying-image-video.git</code></pre>
+            <p id="copy-status" role="status" aria-live="polite">
+              Python 3.11 · Node.js 22 · FFmpeg / ffprobe
+            </p>
+          </div>
+          <div class="start-links">
+            <a href="guide.html"
+              >安装与快速开始 <span aria-hidden="true">↗</span></a
+            ><a href="contributing.html"
+              >参与贡献 <span aria-hidden="true">↗</span></a
+            ><a
+              href="https://github.com/SkyNotSilent/insightcut-jianying-image-video"
+              >在 GitHub 查看源码 <span aria-hidden="true">↗</span></a
+            >
+          </div>
+        </div>
+        <p class="start-note">
+          这里是项目介绍与文档站。工作台在本机运行；模型服务的可用性与费用由所选服务商决定。
+        </p>
+      </section>
+    </main>
+    <footer class="footer wrap">
+      <a class="brand" href="./"
+        ><img
+          src="assets/insightcut-mark.svg"
+          width="32"
+          height="32"
+          alt=""
+        /><span>InsightCut<span class="brand-dot">.</span></span></a
+      >
+      <p>给想法画面，给创作余地。</p>
+      <div>
+        <a href="license.html">MIT License</a
+        ><a href="security.html">安全反馈</a
+        ><a
+          href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/issues"
+          >问题反馈</a
+        >
+      </div>
+      <small>独立开源项目，与剪映、CapCut 无隶属或合作关系。</small>
+    </footer>
+  </body>
+</html>

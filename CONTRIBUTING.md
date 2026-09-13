@@ -72,3 +72,7 @@ UI 修改附桌面/手机截图；产物变化附压缩后的视频或结构验�
 - 提交贡献表示你有权提交相关内容，并同意其贡献以本项目 [MIT](LICENSE) 许可证提供。保留第三方许可证、版权与署名。
 - MIT 覆盖本项目有权授权的软件；第三方商标、服务商 API、依赖及非自有媒体仍遵循其原有条款。
 - 单维护者当前不要求其自己的 PR 获得第二人批准，但必须走 PR 和全部必需 CI。外部 PR 必须经过维护者审查。任何日常发布不得使用管理员绕过。
+
+## 产品网站
+
+网站源码在 `docs/index.html` 与 `docs/assets/site.*`。修改后从根目录运行 `python scripts/build_site.py`、`python scripts/check_site.py`，再在前端目录运行 `npx playwright test --config=playwright.site.config.js`。构建器只处理 Git 登记的公开文件；新增页面请先 `git add`，不需要先提交。截图和失败 trace 在 `test-results-site/`，网站测试使用独立端口 2104。

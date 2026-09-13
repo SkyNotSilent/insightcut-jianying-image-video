@@ -22,7 +22,7 @@
     <a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>成片案例</strong></a>
     · <a href="#从零开始使用"><strong>快速开始</strong></a>
     · <a href="#从一句输入开始"><strong>产品界面</strong></a>
-    · <a href="docs/"><strong>项目文档</strong></a>
+    · <a href="https://skynotsilent.github.io/insightcut-jianying-image-video/"><strong>项目主页与文档</strong></a>
     · <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/issues"><strong>问题反馈</strong></a>
   </p>
 </div>
@@ -220,7 +220,7 @@ npm run dev
 
 ### 5. 完成第一次生成
 
-回到文稿页，输入一个主题，或者切换到文稿模式粘贴完整内容。选择画面比例与视觉风格后生成内容预案；进入生产工作台检查文稿、分镜和提示词，确认音色后再生成图片与配音。素材会在同一页面逐段出现，可以直接连续预览，最后再按需要生成完整视频预览、MP4 或剪映草稿。
+回到文稿页，输入一个主题，或者切换到文稿模式粘贴完整内容。选择画面比例与视觉风格后生成内容预案；按需预览并编辑文稿、分镜和提示词，然后确认生产。图片、配音与 MP4 会在后台连续推进，无需中途再点击生成；剪映草稿在导出页按需构建。
 
 ### 6. 把结果写入剪映
 

@@ -157,3 +157,9 @@ npm run dev
 - 开发/CI 安装后端 requirements-dev.lock（含哈希），更新锁使用 uv pip compile requirements-dev.txt --python-version 3.11 --universal --generate-hashes --output-file requirements-dev.lock。
 - 日常前后端端口仍为 2001/2002；隔离全栈测试默认 2101/2102，浏览器测试 2103，不复用开发服务。
 - 运行 ruff check src api_server.py、npm run lint、scripts/check_contribution.py；完整产物验证运行 scripts/verify_local_flow.py。
+
+### 项目网站
+
+- GitHub Pages 是公开产品介绍与文档站，工作台仍在本机 2001/2002 运行。沿用 `docs/assets/` 品牌素材；案例来自 `docs/showcase/`，禁止把本机运行数据复制到站点。
+- `python scripts/build_site.py` 仅发布 Git 登记的文档与静态资产，构建到 `site-dist/`；`python scripts/check_site.py` 检查全部本地链接。
+- 在前端目录运行 `npx playwright test --config=playwright.site.config.js` 验证 390/768/1440 宽度、真实视频播放与文档，预览服务使用独立端口 2104。
