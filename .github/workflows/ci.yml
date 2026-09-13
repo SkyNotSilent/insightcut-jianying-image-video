@@ -154,6 +154,7 @@ jobs:
         run: |
           python scripts/check_contribution.py
           python scripts/test_contribution.py
+          python scripts/test_pages_gate.py
       - name: Check public repository assets
         run: python scripts/check_readme_assets.py
       - name: Check tracked local-only paths

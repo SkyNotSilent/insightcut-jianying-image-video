@@ -1,0 +1,108 @@
+name: Publish Pages
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Verify successful master CI
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'master' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.gate.outputs.publish }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify exact commit and every CI job
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" > "$RUNNER_TEMP/ci-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/ci-jobs.json"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq .object.sha > "$RUNNER_TEMP/master-sha"
+          python scripts/pages_gate.py "$RUNNER_TEMP/ci-run.json" "$RUNNER_TEMP/ci-jobs.json" "$RUNNER_TEMP/master-sha" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Publish verified static site
+    needs: gate
+    if: needs.gate.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download only the triggering successful CI artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pages-site
+          path: site
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: Verify artifact identity and current head immediately before publishing
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -c 'import json,os; assert json.load(open("site/build-info.json"))["commit"] == os.environ["EXPECTED_SHA"]'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq .object.sha)" = "$EXPECTED_SHA"
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: site
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+      - name: Verify public pages and deployed commit
+        env:
+          SITE_URL: ${{ steps.deployment.outputs.page_url }}
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          python - <<'PY'
+          import json, os, time, urllib.request
+          base = os.environ['SITE_URL'].rstrip('/') + '/'
+          expected = os.environ['EXPECTED_SHA']
+          for attempt in range(18):
+              try:
+                  info = json.load(urllib.request.urlopen(base + 'build-info.json?commit=' + expected, timeout=15))
+                  if info['commit'] == expected:
+                      break
+              except Exception:
+                  pass
+              time.sleep(10)
+          else:
+              raise SystemExit('Published commit did not become available')
+          for route in ['', 'guide.html', 'contributing.html', 'batch-video-workflow.html', 'showcase/', 'assets/site.css', 'assets/insightcut-mark.svg', 'screenshots/workspace.png']:
+              with urllib.request.urlopen(base + route, timeout=20) as response:
+                  assert response.status == 200, route
+                  assert response.read(128), route
+          request = urllib.request.Request(base + 'showcase/videos/book-16x9.mp4', headers={'Range': 'bytes=0-1023'})
+          with urllib.request.urlopen(request, timeout=20) as response:
+              assert response.status == 206, response.status
+              assert len(response.read()) == 1024
+          print('Verified public homepage, documents, media and commit', expected)
+          PY

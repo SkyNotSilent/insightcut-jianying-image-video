@@ -163,3 +163,5 @@ npm run dev
 - GitHub Pages 是公开产品介绍与文档站，工作台仍在本机 2001/2002 运行。沿用 `docs/assets/` 品牌素材；案例来自 `docs/showcase/`，禁止把本机运行数据复制到站点。
 - `python scripts/build_site.py` 仅发布 Git 登记的文档与静态资产，构建到 `site-dist/`；`python scripts/check_site.py` 检查全部本地链接。
 - 在前端目录运行 `npx playwright test --config=playwright.site.config.js` 验证 390/768/1440 宽度、真实视频播放与文档，预览服务使用独立端口 2104。
+
+- Pages 发布使用 `.github/workflows/pages.yml`，只接收本仓库 `master` 的成功 push CI；发布前校验 8 项检查、最新 SHA 和构建产物身份，不执行 PR 产物中的代码。失败、PR、过期运行不能部署。配置与回退见 `docs/pages-release.md`。
