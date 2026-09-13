@@ -62,6 +62,10 @@ Protect `master` with:
   - `Frontend tests, build and audit`
   - `Repository hygiene`
   - `Real full-stack Playwright`
+  - `Filesystem (windows-latest)`
+  - `Filesystem (macos-latest)`
+  - `Workflow and secret checks`
+  - `Website build and browser checks`
 - Block force pushes.
 - Block branch deletion.
 - Apply protection to administrators; require resolved discussions. Single-maintainer PRs do not require a second approver; external PRs need maintainer review.

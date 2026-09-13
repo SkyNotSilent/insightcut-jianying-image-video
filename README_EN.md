@@ -22,7 +22,7 @@
     <a href="https://skynotsilent.github.io/insightcut-jianying-image-video/showcase/"><strong>Showcase</strong></a>
     · <a href="#quick-start"><strong>Quick Start</strong></a>
     · <a href="#start-from-one-line"><strong>Product Tour</strong></a>
-    · <a href="docs/"><strong>Documentation</strong></a>
+    · <a href="https://skynotsilent.github.io/insightcut-jianying-image-video/"><strong>Website &amp; docs</strong></a>
     · <a href="https://github.com/SkyNotSilent/insightcut-jianying-image-video/issues"><strong>Issues</strong></a>
   </p>
 </div>
