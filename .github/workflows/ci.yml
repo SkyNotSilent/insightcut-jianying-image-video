@@ -29,7 +29,8 @@ jobs:
           cache: "pip"
           cache-dependency-path: ai-kepu-video-server/requirements-dev.lock
       - name: Install FFmpeg and PDF tools
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg poppler-utils
+        timeout-minutes: 6
+        run: bash scripts/install_ci_media_tools.sh --pdf
       - name: Install backend dependencies
         working-directory: ai-kepu-video-server
         run: |
@@ -103,7 +104,8 @@ jobs:
           cache: "pip"
           cache-dependency-path: ai-kepu-video-server/requirements-dev.lock
       - name: Install FFmpeg
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg
+        timeout-minutes: 6
+        run: bash scripts/install_ci_media_tools.sh
       - name: Install backend dependencies
         working-directory: ai-kepu-video-server
         run: python -m pip install --require-hashes -r requirements-dev.lock
@@ -155,6 +157,7 @@ jobs:
           python scripts/check_contribution.py
           python scripts/test_contribution.py
           python scripts/test_pages_gate.py
+          python scripts/test_ci_media_tools.py
       - name: Check public repository assets
         run: python scripts/check_readme_assets.py
       - name: Check tracked local-only paths
